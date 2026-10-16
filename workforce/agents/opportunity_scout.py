@@ -27,7 +27,6 @@ class OpportunityScout(Agent):
             "sweep_sources": self.sweep_sources,
             "check_source": self.check_source,
             "find_opportunities": self.sweep_sources,
-            "deadline_digest": self.deadline_digest,
             "process_verification": self.process_verification,
         }
 
@@ -101,7 +100,8 @@ class OpportunityScout(Agent):
         if ctx.db.scalar("SELECT 1 FROM opportunities WHERE fingerprint=?", (fp,)):
             return True
         norm = parsing.normalize_title(opp["title"])
-        recent = ctx.db.all("SELECT title FROM opportunities WHERE discovered_at > ? AND type=?", (now() - 120 * 86400, opp["type"]))
+        # compare across types: the same event is often labelled differently by different sources
+        recent = ctx.db.all("SELECT title FROM opportunities WHERE discovered_at > ?", (now() - 120 * 86400,))
         return any(difflib.SequenceMatcher(None, norm, parsing.normalize_title(r["title"])).ratio() > 0.92 for r in recent)
 
     def _store(self, ctx: AgentContext, opp: dict, src: dict) -> str | None:
@@ -119,7 +119,8 @@ class OpportunityScout(Agent):
                 (oid, fp, opp["title"], opp.get("organizer"), opp.get("official_url"), src["id"], opp.get("discovery_url"),
                  opp["type"], opp.get("location"), opp["remote_status"], opp.get("deadline"), opp.get("deadline_text"),
                  opp.get("deadline_tz"), dumps(opp.get("eligibility", [])), dumps(opp.get("required_materials", [])),
-                 opp.get("estimated_effort"), opp.get("summary"), now(), dumps({"raw_text": opp.get("raw_text", "")[:8000]})))
+                 opp.get("estimated_effort"), opp.get("summary"), now(), dumps({"raw_text": opp.get("raw_text", "")[:8000],
+                                                       "candidate_links": opp.get("candidate_links", [])})))
         except Exception as e:
             if "UNIQUE" in str(e):
                 return None
@@ -183,10 +184,14 @@ class OpportunityScout(Agent):
                      topic="opportunity.verified", dedupe_key=f"found:{oid}")
         notified = False
         if score >= ctx.bot.settings.get("notify_min_score", 0.7) and not opp["notified"]:
-            r = ctx.notify_owner(format_alert(opp), key=f"opp:{oid}")
-            notified = bool(r and r.status in ("succeeded", "dry_run", "duplicate"))
-            if notified:
-                ctx.db.execute("UPDATE opportunities SET notified=1 WHERE id=?", (oid,))
+            from ..owner_actions import opportunity_card, schedule_deadline_reminders
+            text, buttons = opportunity_card(opp, short=True)
+            # only a verified match closing within 72h interrupts you; the rest waits for the morning brief
+            urgent = status == "verified" and bool(opp["deadline"]) and opp["deadline"] - now() < 72 * 3600
+            ctx.notify_owner(text, key=f"opp:{oid}", urgent=urgent, buttons=buttons)
+            notified = True   # stored: delivered now or listed in the next brief
+            ctx.db.execute("UPDATE opportunities SET notified=1 WHERE id=?", (oid,))
+            schedule_deadline_reminders(ctx.db, opp, ctx.bot.id)
         return {"opportunity_id": oid, "status": status, "score": score, "notified": notified, "note": note}
 
     def _write_note(self, ctx: AgentContext, opp: dict) -> str | None:
@@ -202,20 +207,6 @@ class OpportunityScout(Agent):
         if path:
             ctx.db.execute("UPDATE opportunities SET note_path=? WHERE id=?", (path, opp["id"]))
         return path
-
-    def deadline_digest(self, ctx: AgentContext, task: Task) -> dict:
-        t = now()
-        rows = ctx.db.all("SELECT * FROM opportunities WHERE deadline BETWEEN ? AND ? AND verification_status!='failed' "
-                          "AND application_status NOT IN ('SUBMITTED','CLOSED') ORDER BY deadline", (t, t + 7 * 86400))
-        if not rows:
-            return {"due_soon": 0}
-        lines = ["⏰ Deadlines in the next 7 days:"]
-        for r in rows[:15]:
-            lines.append(f"• {r['title'][:80]} — {iso(r['deadline'], get_settings().timezone)[:16].replace('T', ' ')} "
-                         f"({r['verification_status']})\n  {r['official_url'] or 'no URL'}")
-        day = datetime.now(ZoneInfo(get_settings().timezone)).strftime("%Y-%m-%d")
-        ctx.notify_owner("\n".join(lines), key=f"digest:{day}")
-        return {"due_soon": len(rows)}
 
 
 def _slug(t: str) -> str:
@@ -255,14 +246,6 @@ def score_opportunity(opp: dict, profile: dict) -> tuple[float, str]:
     if opp.get("verification_status") == "failed":
         score *= 0.2
     return round(min(score, 1.0), 2), "; ".join(reasons)
-
-
-def format_alert(opp: dict) -> str:
-    tz = get_settings().timezone
-    dl = iso(opp["deadline"], tz)[:16].replace("T", " ") + f" ({opp['deadline_tz']})" if opp.get("deadline") else "unknown"
-    return (f"🎯 New {opp['type']}: {opp['title']}\n"
-            f"Deadline: {dl}\nScore: {opp['relevance_score']} — {opp['relevance_rationale']}\n"
-            f"Verification: {opp['verification_status']}\n{opp['official_url'] or 'URL unknown'}")
 
 
 def opportunity_note(opp: dict) -> tuple[dict, str]:

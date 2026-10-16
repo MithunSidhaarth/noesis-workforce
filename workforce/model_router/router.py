@@ -73,7 +73,9 @@ class AnthropicProvider:
             kwargs["extra_headers"] = {"anthropic-beta": "server-side-fallback-2026-07-01"}
             kwargs["extra_body"] = {"fallbacks": "default"}
         try:
-            resp = self.client.messages.create(
+            timeout = float(model.get("_timeout", 120))
+            client = self.client.with_options(timeout=timeout, max_retries=2 if timeout >= 90 else 0)
+            resp = client.messages.create(
                 model=model["model"], max_tokens=max_tokens, system=system,
                 messages=[{"role": "user", "content": prompt}], **kwargs)
         except a.AuthenticationError as e:
@@ -101,7 +103,7 @@ class OpenAICompatibleProvider:
     def complete(self, model: dict, system: str, prompt: str, max_tokens: int) -> Completion:
         import httpx
         try:
-            r = httpx.post(f"{self.base_url}/chat/completions", timeout=120,
+            r = httpx.post(f"{self.base_url}/chat/completions", timeout=float(model.get("_timeout", 120)),
                            headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
                            json={"model": model["model"], "max_tokens": max_tokens,
                                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]})
@@ -168,7 +170,8 @@ class ModelRouter:
         return self.db.one(q, args) or {"calls": 0, "cost": 0}
 
     def complete(self, bot: BotConfig, capability: str, prompt: str, system: str = "", max_tokens: int = 1500,
-                 task_id: str | None = None, cache: bool = True) -> Completion:
+                 task_id: str | None = None, cache: bool = True, time_left: float | None = None) -> Completion:
+        """time_left: seconds the calling task has left; provider timeouts are capped to it."""
         key = sha(capability, system, prompt, max_tokens)
         if cache:
             r = self.db.one("SELECT response_json, created_at FROM model_cache WHERE key=?", (key,))
@@ -186,6 +189,7 @@ class ModelRouter:
         if not cands:
             raise ModelUnavailable(f"no configured model for capability '{capability}' in tiers {bot.model.allowed_tiers}")
         errors = []
+        started = now()
         for m in cands:
             est = (len(prompt + system) / 4 * m["in"] + max_tokens * m["out"]) / 1e6
             if est > 0 and self.usage_today()["cost"] + est > self.cfg.get("global_daily_budget_usd", 0):
@@ -194,6 +198,12 @@ class ModelRouter:
             if est > 0 and bot.model.daily_budget_usd and mine["cost"] + est > bot.model.daily_budget_usd:
                 errors.append(f"{m['id']}: bot daily budget would be exceeded")
                 continue
+            if time_left is not None:
+                left = time_left - (now() - started)
+                if left < 20:
+                    errors.append(f"{m['id']}: not enough task time left")
+                    break
+                m = {**m, "_timeout": min(120.0, left - 10)}
             try:
                 c = self.provider(m["provider"]).complete(m, system, prompt, max_tokens)
             except ModelUnavailable as e:

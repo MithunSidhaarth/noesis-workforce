@@ -37,9 +37,83 @@ def test_dry_run_prevents_real_side_effects(env, services):
 def test_emergency_pause_blocks_external_actions(env, services):
     SystemState(env.db).set("paused", True, by="user")
     SIDE_EFFECTS.clear()
-    r = gw(env).execute(ActionRequest(bot_id="echo_a", action="telegram.notify_owner", idempotency_key="p1"), bot(services), ok_exec)
-    assert r.status == "blocked" and "pause" in r.error
+    for action in ("email.send", "social.publish", "outreach.send", "application.submit"):
+        r = gw(env).execute(ActionRequest(bot_id="echo_a", action=action, target="x@example.com", idempotency_key=f"p-{action}",
+                                          attributes={"approval_granted": True}), bot(services), ok_exec)
+        assert r.status == "blocked" and "pause" in r.error and r.retry_at
     assert SIDE_EFFECTS == []
+    # you still hear about approvals and failures while paused
+    r = gw(env).execute(ActionRequest(bot_id="echo_a", action="telegram.notify_owner", idempotency_key="p1"), bot(services), ok_exec)
+    assert r.status == "succeeded"
+
+
+def test_paused_work_waits_and_resumes_instead_of_being_dropped(env, services):
+    SystemState(env.db).set("paused", True, by="user")
+    SIDE_EFFECTS.clear()
+    tid, _ = services.queue.enqueue(TaskSpec(bot_id="echo_a", kind="send_email", payload={"key": "pz", "to": "a@example.com"}))
+    BotRuntime("echo_a", services, "t").step()
+    t = services.queue.get(tid)
+    assert t.status == "deferred" and "pause" in t.error and t.attempts == 0 and SIDE_EFFECTS == []
+    SystemState(env.db).set("paused", False, by="user")
+    env.db.execute("UPDATE tasks SET run_after=0 WHERE id=?", (tid,))
+    BotRuntime("echo_a", services, "t").step()
+    assert services.queue.get(tid).status == "waiting_approval"   # back on the normal path
+
+
+def test_daily_cap_defers_until_tomorrow(env, services):
+    import yaml
+    pol = env.policies / "email.yaml"
+    data = yaml.safe_load(pol.read_text())
+    data.update({"allow_send": True, "max_sends_per_day": 1, "auto_reply_categories": ["routine"],
+                 "recipient_allowlist_domains": ["example.com"]})
+    pol.write_text(yaml.safe_dump(data))
+    services.gateway = ActionGateway(env.db)
+    SIDE_EFFECTS.clear()
+    attrs = {"category": "routine"}
+    t1, _ = services.queue.enqueue(TaskSpec(bot_id="echo_a", kind="send_email", payload={"key": "c1", "attrs": attrs}))
+    t2, _ = services.queue.enqueue(TaskSpec(bot_id="echo_a", kind="send_email", payload={"key": "c2", "attrs": attrs}))
+    rt = BotRuntime("echo_a", services, "t")
+    rt.step()
+    assert services.queue.get(t1).status == "succeeded" and SIDE_EFFECTS == ["c1"]
+    t = env.db.one("SELECT * FROM tasks WHERE id=?", (t2,))
+    assert t["status"] == "deferred" and "cap" in t["error"] and t["run_after"] > __import__("time").time() + 60
+
+
+def test_dry_run_rehearsal_does_not_block_the_real_run_later(env, services):
+    SystemState(env.db).set("dry_run", True, by="user")
+    SIDE_EFFECTS.clear()
+    req = ActionRequest(bot_id="echo_a", action="telegram.notify_owner", idempotency_key="rehearse")
+    from workforce.policies.engine import Policies
+    pol = Policies()
+    pol._data["global"]["dry_run_exempt"] = []
+    g = ActionGateway(env.db, PolicyEngine(env.db, pol))
+    assert g.execute(req, bot(services), ok_exec).status == "dry_run"
+    assert g.execute(req, bot(services), ok_exec).status == "duplicate"   # still rehearsing: no repeat
+    SystemState(env.db).set("dry_run", False, by="user")
+    assert g.execute(req, bot(services), ok_exec).status == "succeeded" and SIDE_EFFECTS == ["rehearse"]
+
+
+def test_interrupted_send_is_never_blindly_repeated(env, services):
+    """A crash between calling the provider and recording the result leaves an
+    'executing' row. A retry of a risky action must not send again."""
+    import time as _t
+    import yaml
+    p = env.policies / "outreach.yaml"
+    d = yaml.safe_load(p.read_text())
+    d["allow_send"] = True
+    p.write_text(yaml.safe_dump(d))
+    SIDE_EFFECTS.clear()
+    req = ActionRequest(bot_id="echo_a", action="outreach.send", target="x@example.com", idempotency_key="crashy",
+                        attributes={"approval_granted": True, "relevance": 0.9})
+    env.db.execute("INSERT INTO external_actions(id, idempotency_key, bot_id, action, status, request_json, created_at, updated_at) "
+                   "VALUES ('act_x','crashy','echo_a','outreach.send','executing','{}',?,?)", (_t.time(), _t.time()))
+    from workforce.policies.engine import ActionInFlight
+    with pytest.raises(ActionInFlight):          # someone is (maybe) still sending: wait
+        gw(env).execute(req, bot(services), ok_exec)
+    env.db.execute("UPDATE external_actions SET updated_at=? WHERE idempotency_key='crashy'", (_t.time() - 7200,))
+    r = ActionGateway(env.db).execute(req, bot(services), ok_exec)   # stale: outcome unknown, ask the owner
+    assert r.status == "unknown" and SIDE_EFFECTS == []
+    assert ActionGateway(env.db).execute(req, bot(services), ok_exec).status == "unknown" and SIDE_EFFECTS == []
 
 
 def test_email_policy_blocks_unauthorized_send_and_requires_approval(env, services):

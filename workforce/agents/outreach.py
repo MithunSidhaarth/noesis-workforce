@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 
-from ..core.db import loads
 from ..core.queue import Task
 from ..core.util import new_id, now
 from ..sources.registry import load_profile

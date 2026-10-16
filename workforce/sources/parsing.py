@@ -9,7 +9,7 @@ from __future__ import annotations
 import html
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse, parse_qsl, urlencode
 from zoneinfo import ZoneInfo
@@ -148,6 +148,34 @@ def extract_materials(text: str) -> list[str]:
     return found
 
 
+NOT_OFFICIAL = ("twitter.com", "x.com", "facebook.com", "instagram.com", "linkedin.com", "t.me", "wa.me", "whatsapp.com",
+                "youtube.com", "youtu.be", "bit.ly", "tinyurl.com", "medium.com", "reddit.com", "discord.gg", "discord.com")
+
+
+def body_links(html: str, base_url: str) -> list[str]:
+    if not html or "<a" not in html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    return [urljoin(base_url, a.get("href")) for a in soup.select("a[href]")][:20]
+
+
+def candidate_official_links(links: list[str], listing_url: str | None) -> list[str]:
+    """Links inside a listing that might be the organiser's own page. Unconfirmed:
+    shown to the owner as a hint, never used as the official URL automatically."""
+    own = domain(listing_url) if listing_url else ""
+    out = []
+    for u in links or []:
+        u = normalize_url(u)
+        if not u or not u.startswith("https://"):
+            continue
+        d = domain(u)
+        if not d or d == own or d.endswith("." + own) or any(d == s or d.endswith("." + s) for s in NOT_OFFICIAL):
+            continue
+        if u not in out:
+            out.append(u)
+    return out[:5]
+
+
 def parse_feed(content: bytes, base_url: str) -> list[dict]:
     f = feedparser.parse(content)
     items = []
@@ -162,7 +190,7 @@ def parse_feed(content: bytes, base_url: str) -> list[dict]:
                 published = datetime(*e[k][:6]).timestamp()
                 break
         items.append({"title": clean_text(e.get("title")), "url": urljoin(base_url, e.get("link", "")),
-                      "body": clean_text(body), "published": published,
+                      "body": clean_text(body), "published": published, "links": body_links(body, base_url),
                       "author": clean_text(e.get("author")) or None,
                       "tags": [t.get("term") for t in e.get("tags", []) if t.get("term")]})
     return items
@@ -181,6 +209,7 @@ def parse_html(content: bytes, base_url: str, cfg: dict) -> list[dict]:
             return (el.get(attr) or "") if attr else el.get_text(" ", strip=True)
         link = pick(cfg.get("link", "a"), "href")
         items.append({"title": clean_text(pick(cfg.get("title"))), "url": urljoin(base_url, link) if link else None,
+                      "links": [urljoin(base_url, a.get("href")) for a in node.select("a[href]")][:20],
                       "body": clean_text(pick(cfg.get("body")) or node.get_text(" ", strip=True)),
                       "published": None, "author": clean_text(pick(cfg.get("organizer"))) or None, "tags": []})
     return items
@@ -248,6 +277,7 @@ def normalize_item(item: dict, source: dict, default_tz: str) -> dict | None:
         "summary": (item.get("body") or "")[:600],
         "published": item.get("published"),
         "raw_text": text[:8000],
+        "candidate_links": candidate_official_links(item.get("links", []), url),
     }
 
 

@@ -64,6 +64,9 @@ class QualityAgent(Agent):
             else:
                 notes.append(AGGREGATOR_HINT + f" ({d})")
                 review = True
+                cands = loads(opp.get("raw_json"), {}).get("candidate_links", [])
+                if cands:
+                    notes.append(f"possible official page (unconfirmed): {cands[0]}")
             if ctx.bot.settings.get("check_url_reachable") and ctx.services.get("fetcher") and src.get("kind") != "fixture":
                 ok, detail = ctx.services["fetcher"].head_ok(url)
                 notes.append(f"reachability: {detail}")

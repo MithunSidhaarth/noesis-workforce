@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,7 +32,8 @@ class Settings:
     telegram_token: str = field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
     telegram_owner_id: str = field(default_factory=lambda: os.environ.get("TELEGRAM_OWNER_ID", ""))
     redis_url: str = field(default_factory=lambda: os.environ.get("REDIS_URL", ""))
-    worker_id: str = field(default_factory=lambda: os.environ.get("NOESIS_WORKER_ID", f"worker-{os.getpid()}"))
+    worker_id: str = field(default_factory=lambda: os.environ.get("NOESIS_WORKER_ID") or socket.gethostname())
+    # stable across restarts of the same container, so a restarted worker hands back its own leases at once
     poll_interval_s: float = field(default_factory=lambda: float(os.environ.get("NOESIS_POLL_INTERVAL", "2")))
     http_user_agent: str = field(default_factory=lambda: os.environ.get(
         "NOESIS_USER_AGENT", "NOESIS-Workforce/0.1 (+personal opportunity monitor; contact owner)"))

@@ -40,7 +40,8 @@ SENSITIVE_FACTS = {"date_of_birth", "id_number", "aadhaar", "passport_number", "
 
 
 def verified_facts(profile: dict) -> dict:
-    return {k: v["value"] for k, v in (profile.get("facts") or {}).items() if isinstance(v, dict) and v.get("verified")}
+    return {k: v["value"] for k, v in (profile.get("facts") or {}).items()
+            if isinstance(v, dict) and v.get("verified") and v.get("value") not in (None, "")}
 
 
 def check_eligibility(statements: list[str], facts: dict) -> tuple[str, list[str], list[str]]:
@@ -110,7 +111,7 @@ class ApplicationsAgent(Agent):
 
     def handlers(self):
         return {"evaluate_opportunity": self.evaluate, "prepare_application": self.evaluate,
-                "submit_application": self.submit}
+                "submit_application": self.submit, "follow_up_sweep": self.follow_up_sweep}
 
     def _transition(self, ctx: AgentContext, app: dict, new: str, note: str) -> dict:
         if new != app["state"] and new not in ALLOWED[app["state"]]:
@@ -118,6 +119,9 @@ class ApplicationsAgent(Agent):
         hist = loads(app["history_json"], []) + [{"ts": now(), "from": app["state"], "to": new, "note": note}]
         ctx.db.execute("UPDATE applications SET state=?, history_json=?, updated_at=? WHERE id=?", (new, dumps(hist), now(), app["id"]))
         ctx.db.execute("UPDATE opportunities SET application_status=? WHERE id=?", (new, app["opportunity_id"]))
+        if new in ("SUBMITTED", "CLOSED"):
+            from ..owner_actions import cancel_opportunity_reminders
+            cancel_opportunity_reminders(ctx.db, app["opportunity_id"])
         audit(ctx.db, ctx.bot.id, "application.transition", None, {"application_id": app["id"], "from": app["state"], "to": new, "note": note})
         app = dict(app, state=new, history_json=dumps(hist))
         return app
@@ -133,6 +137,9 @@ class ApplicationsAgent(Agent):
             ctx.db.execute("INSERT OR IGNORE INTO applications(id, opportunity_id, state, created_at, updated_at) VALUES (?,?,?,?,?)",
                            (aid, oid, "DISCOVERED", now(), now()))
             app = ctx.db.one("SELECT * FROM applications WHERE opportunity_id=?", (oid,))
+        elif app["state"] == "REVIEW" and task.payload.get("refresh"):
+            # new information from the owner (a confirmed link, a profile fact): prepare again
+            app = self._transition(ctx, app, "PREPARATION", "refreshed with new information")
         elif app["state"] not in ("DISCOVERED", "VERIFIED", "ELIGIBILITY_CHECK", "PREPARATION"):
             return {"application_id": app["id"], "state": app["state"], "duplicate": True}
         if opp["verification_status"] != "verified":
@@ -157,27 +164,26 @@ class ApplicationsAgent(Agent):
         ctx.db.execute("UPDATE applications SET answers_json=?, missing_json=?, documents_json=?, submission_method=?, updated_at=? WHERE id=?",
                        (dumps(answers), dumps(missing), dumps(docs), method, now(), app["id"]))
         app = self._transition(ctx, app, "REVIEW", f"prepared; {len(missing)} missing item(s)")
-        if opp["deadline"]:
-            for days in (7, 2):
-                due = opp["deadline"] - days * 86400
-                if due > now():
-                    ctx.delegate("personal_ops", "create_reminder",
-                                 {"title": f"{opp['title'][:80]} closes in {days} day(s)", "due_at": due,
-                                  "source": "applications", "ref_id": app["id"], "dedupe_key": f"appdl:{app['id']}:{days}"},
-                                 dedupe_key=f"rem:{app['id']}:{days}")
+        from ..owner_actions import closes_in, ref, schedule_deadline_reminders
+        schedule_deadline_reminders(ctx.db, opp, ctx.bot.id)
         ctx.send(MessageType.RESEARCH_FINDING, {"application_id": app["id"], "opportunity_id": oid, "missing": missing},
                  topic="application.ready", dedupe_key=f"appready:{app['id']}")
-        msg = (f"📝 Application prepared: {opp['title'][:90]}\nEligibility: {status}"
-               + (f"\nNeeds from you: {', '.join(missing[:8])}" if missing else "")
-               + f"\nSubmission: {method}" + (" (you submit; then record the confirmation)" if method == "web_form" else ""))
-        ctx.notify_owner(msg, key=f"appprep:{app['id']}")
+        elig = {"eligible": "you qualify on every stated criterion", "needs_info": "can't confirm yet",
+                "unknown": "not checked"}.get(status, status)
+        msg = (f"📝 Draft ready: {opp['title'][:90]}\n{closes_in(opp['deadline'])}\nEligibility: {elig}"
+               + (f"\nNeeds from you: {', '.join(missing[:8])} (see /missing)" if missing else "\nNothing missing.")
+               + ("\nYou submit it on the site, then send /submitted " + ref(app['id']) + " <confirmation>."
+                  if method == "web_form" else "\nSubmission: by email, after your approval.")
+               + f"\nRef {ref(app['id'])}")
+        soon = bool(opp["deadline"]) and opp["deadline"] - now() < 72 * 3600
+        ctx.notify_owner(msg, key=f"appprep:{app['id']}:{len(missing)}", urgent=soon)
         return {"application_id": app["id"], "state": "REVIEW", "eligibility": status, "missing": missing,
                 "submission_method": method, "destination": dest}
 
     def _prepare(self, ctx: AgentContext, opp: dict, profile: dict, unknown: list[str]) -> tuple[dict, list[str], list[dict]]:
         answers, missing, docs = {}, list(unknown), []
         verified_answers = {k: v["value"] for k, v in (profile.get("answers") or {}).items()
-                            if isinstance(v, dict) and v.get("verified")}
+                            if isinstance(v, dict) and v.get("verified") and v.get("value") not in (None, "")}
         documents = {k: v for k, v in (profile.get("documents") or {}).items() if isinstance(v, dict) and v.get("verified")}
         for mat in loads(opp["required_materials_json"], []):
             key = MATERIAL_TO_DOC.get(mat, mat)
@@ -247,6 +253,18 @@ class ApplicationsAgent(Agent):
             ctx.db.execute("UPDATE applications SET evidence=?, confirmation_id=?, follow_up_at=? WHERE id=?",
                            (res.evidence, (res.result or {}).get("confirmation_id"), now() + 14 * 86400, app["id"]))
         return {"application_id": app["id"], "action": res.status, "evidence": res.evidence, "reasons": res.reasons}
+
+
+    def follow_up_sweep(self, ctx: AgentContext, task: Task) -> dict:
+        """Submitted applications whose follow-up date passed: ask the owner how it went."""
+        from ..owner_actions import ref
+        due = ctx.db.all("SELECT a.*, o.title FROM applications a JOIN opportunities o ON o.id=a.opportunity_id "
+                         "WHERE a.state='SUBMITTED' AND a.follow_up_at IS NOT NULL AND a.follow_up_at<=?", (now(),))
+        for a in due:
+            self._transition(ctx, a, "FOLLOW_UP", "follow-up date reached")
+            ctx.notify_owner(f"📬 Any news on “{a['title'][:80]}”? It was submitted two weeks ago.\n"
+                             f"Reply /outcome {ref(a['id'])} accepted | rejected | no_response", key=f"followup:{a['id']}")
+        return {"follow_ups": len(due)}
 
 
 def record_manual_submission(db, application_id: str, confirmation: str, by: str) -> dict:

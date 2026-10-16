@@ -1,4 +1,3 @@
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -50,6 +49,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("NOESIS_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("NOESIS_VAULT_PATH", str(vault))
     monkeypatch.setenv("NOESIS_DRY_RUN", "false")
+    # deterministic delivery in tests; quiet hours have their own tests
+    monkeypatch.setenv("NOESIS_QUIET_HOURS", "off")
+    monkeypatch.setenv("NOESIS_MAX_PINGS_PER_DAY", "1000")
     for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OLLAMA_ENABLED", "TELEGRAM_BOT_TOKEN"):
         monkeypatch.delenv(k, raising=False)
 
@@ -76,7 +78,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def services(env):
-    from tests.helpers import FakeTelegram, ScriptedProvider
+    from tests.helpers import FakeTelegram
     from workforce.model_router.router import ModelRouter
     from workforce.runtime import Services
     router = ModelRouter(env.db, providers={})

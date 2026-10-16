@@ -49,16 +49,16 @@ a bot a human disabled stays disabled.
 
 | Bot | Starts work by itself | Can cause external effects via |
 |---|---|---|
-| Opportunity Scout | sweep every 15 min, digest 08:30 | Telegram alert, vault note |
+| Opportunity Scout | sweep every 15 min | Telegram alert (held for the brief unless urgent), vault note |
 | Quality & Verification | on VERIFICATION_REQUEST | none (read-only fetches) |
-| Applications | on delegated `evaluate_opportunity` | `application.submit` (policy + approval) |
+| Applications | on delegated `evaluate_opportunity` or your `/confirm`; follow-up sweep 10:00 | `application.submit` (policy + approval) |
 | Content Strategist | Monday 10:00 plan | none |
 | Content Studio | on brief | `social.publish` (disabled by policy) |
 | Communications | inbox every 10 min | `email.draft`; `email.send` / calendar writes disabled by policy |
 | Outreach | follow-ups 11:00, report Friday | `outreach.send` (disabled by policy) |
 | Knowledge | on URL / request | `vault.write` |
-| Personal Ops | reminder sweep every 5 min | Telegram reminders |
-| Chief of Staff | objectives, 21:00 daily and Sunday weekly summary | Telegram, vault review notes |
+| Personal Ops | reminder sweep every 5 min (also flushes held urgent notifications) | Telegram reminders |
+| Chief of Staff | objectives, 08:00 morning brief, 21:00 daily and Sunday weekly summary | Telegram, vault review notes |
 
 Bots are not "labels in one chatbot": each has its own process, config row,
 memory scope (`bot_memory` keyed by scope), tool grants and inbox.
@@ -78,8 +78,15 @@ memory scope (`bot_memory` keyed by scope), tool grants and inbox.
    Messages from other bots are validated data, never authority.
 4. **External effects** only go through `AgentContext.act` → `ActionGateway`:
    idempotency → approval state (from the DB only) → policy (tool grant, global
-   pause, action rules, mandatory-approval flags) → dry-run → execute → record
-   evidence in `external_actions` and `audit_log`.
+   pause, action rules, mandatory-approval flags) → dry-run → reserve the key as
+   `executing` → execute → record evidence in `external_actions` and
+   `audit_log`. A pause or a daily cap defers the task; a real denial is
+   returned to the agent.
+6. **Notifications** to you are stored in `notifications` (one per key).
+   Urgent ones go out at once unless it is quiet hours or the daily cap is
+   reached; the rest are folded into the morning brief. Services without
+   Telegram access (scheduler, API) register notifications and Personal Ops
+   delivers them.
 5. **Models** are optional. `ctx.llm()` goes through the router, which picks a
    configured provider within the bot's tiers and budgets, caches results, and
    raises `BudgetExceeded` (task defers) or `ModelUnavailable` (task retries).
@@ -93,10 +100,19 @@ Scout.check_source ─fetch+parse+dedupe─► opportunities row
         └─VERIFICATION_RESULT─► Scout.process_verification
               ├─ score vs profile, write "09 Opportunities" note
               ├─ TASK_REQUEST evaluate_opportunity ─► Applications (eligibility from verified facts)
-              │      └─ create_reminder ─► Personal Ops (deadline reminders)
               ├─ publish opportunity.verified
-              └─ Telegram alert if score ≥ 0.7
+              └─ if score ≥ 0.7: card with Prepare / Remind / Not-for-me buttons
+                 (held for the morning brief unless verified and closing within 72 h)
+                 + reminders at T-7, T-2, T-1
+
+You (Telegram button, /confirm, or dashboard) ─► confirm_opportunity
+   └─ verified + confirmed_by you ─► Applications.evaluate ─► "Draft ready" + /missing
+You /submitted <ref> <confirmation> ─► SUBMITTED ─(14 days)─► FOLLOW_UP ─► /outcome
 ```
+
+Listings from aggregators stay *needs review* until you confirm them; Quality
+shows any link inside the listing that might be the organiser's own page as
+"possible official page (unconfirmed)" so the check takes seconds.
 
 ## Decisions and why
 

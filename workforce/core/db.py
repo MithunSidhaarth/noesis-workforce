@@ -89,6 +89,11 @@ class Database:
                 continue
             sql = f.read_text(encoding="utf-8")
             c.execute("BEGIN IMMEDIATE")
+            # several services start at once: re-check under the write lock so
+            # a migration another process just applied is not run twice
+            if c.execute("SELECT 1 FROM schema_migrations WHERE name=?", (f.name,)).fetchone():
+                c.execute("ROLLBACK")
+                continue
             try:
                 for stmt in _split_sql(sql):
                     c.execute(stmt)

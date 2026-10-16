@@ -99,7 +99,7 @@ def test_web_form_submission_is_manual_and_evidenced(env, services):
 
 
 def test_obsidian_preserves_user_notes_and_avoids_duplicates(env):
-    from integrations.obsidian.vault import UserNoteProtected, Vault
+    from integrations.obsidian.vault import Vault
     v = Vault(env.vault)
     user = Path(env.vault) / "09 Opportunities" / "My note.md"
     user.parent.mkdir(parents=True)

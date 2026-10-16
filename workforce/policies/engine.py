@@ -7,7 +7,7 @@ dry-run. It records an auditable row in external_actions for every outcome.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -16,6 +16,7 @@ import yaml
 
 from ..contracts import ActionRequest, BotConfig, Decision, ExternalActionResult, PolicyDecision
 from ..core.db import Database, dumps, get_db, loads
+from ..core.errors import PermanentError
 from ..core.settings import get_settings
 from ..core.state import SystemState, audit, exec_log
 from ..core.util import new_id, now, redact
@@ -27,6 +28,13 @@ class IntegrationError(Exception):
 
 class IntegrationRevoked(IntegrationError):
     """Credential missing/revoked; retrying will not help until a human fixes it."""
+
+
+class ActionInFlight(IntegrationError):
+    """Another attempt of the same action is executing right now; retry later."""
+
+
+IN_FLIGHT_STALE_S = 1800   # an 'executing' row older than this belongs to a crashed attempt
 
 
 class Policies:
@@ -65,8 +73,9 @@ class PolicyEngine:
         if req.action not in bot.tools:
             return PolicyDecision(decision=Decision.deny, reasons=[f"{bot.id} has no grant for {req.action}"], policy="global")
         side_effect = actions[req.action].get("side_effect", True)
-        if side_effect and self.state.paused:
-            return PolicyDecision(decision=Decision.deny, reasons=["global emergency pause is active"], policy="global")
+        if side_effect and self.state.paused and req.action not in g.get("pause_exempt", []):
+            return PolicyDecision(decision=Decision.deny, reasons=["global emergency pause is active"], policy="global",
+                                  retry_at=now() + 900)
 
         approved = bool(req.attributes.get("approval_granted"))
         flags = set(req.attributes.get("flags", []))
@@ -98,6 +107,11 @@ class PolicyEngine:
         d = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
         return d.timestamp()
 
+    def _cap(self, reason: str, policy: str, weekly: bool = False) -> PolicyDecision:
+        """A cap clears by itself: block now, retry when the window resets."""
+        retry = now() + 86400 if weekly else self._day_start() + 86400 + 300
+        return PolicyDecision(decision=Decision.deny, reasons=[reason], policy=policy, retry_at=retry)
+
     def _publish_rule(self, req: ActionRequest) -> PolicyDecision:
         p = self.p.get("publishing")
         a = req.attributes
@@ -118,12 +132,12 @@ class PolicyEngine:
                 deny.append(f"failed check: {attr}")
         if p.get("require_fact_check_when_claims") and a.get("has_claims") and not a.get("facts_verified"):
             deny.append("claims not verified")
-        if self._count_actions("social.publish", self._day_start()) >= p.get("max_posts_per_day", 1):
-            deny.append("daily post cap reached")
-        if self._count_actions("social.publish", now() - 7 * 86400) >= p.get("max_posts_per_week", 4):
-            deny.append("weekly post cap reached")
         if deny:
             return PolicyDecision(decision=Decision.deny, reasons=deny, policy="publishing")
+        if self._count_actions("social.publish", self._day_start()) >= p.get("max_posts_per_day", 1):
+            return self._cap("daily post cap reached", "publishing")
+        if self._count_actions("social.publish", now() - 7 * 86400) >= p.get("max_posts_per_week", 4):
+            return self._cap("weekly post cap reached", "publishing", weekly=True)
         return PolicyDecision(decision=Decision.allow, reasons=reasons or ["publishing policy satisfied"], policy="publishing")
 
     def _email_rule(self, req: ActionRequest) -> PolicyDecision:
@@ -135,7 +149,7 @@ class PolicyEngine:
         if a.get("category") not in p.get("auto_reply_categories", []) or dom not in p.get("recipient_allowlist_domains", []):
             return PolicyDecision(decision=Decision.require_approval, reasons=["recipient/category not in auto-reply allowlist"], policy="email")
         if self._count_actions("email.send", self._day_start()) >= p.get("max_sends_per_day", 10):
-            return PolicyDecision(decision=Decision.deny, reasons=["daily email cap reached"], policy="email")
+            return self._cap("daily email cap reached", "email")
         return PolicyDecision(decision=Decision.allow, reasons=["email policy satisfied"], policy="email")
 
     def _calendar_rule(self, req: ActionRequest) -> PolicyDecision:
@@ -182,7 +196,7 @@ class PolicyEngine:
         if not p.get("allow_send"):
             return PolicyDecision(decision=Decision.require_approval, reasons=["outreach sending not enabled"], policy="outreach")
         if self._count_actions("outreach.send", self._day_start()) >= p.get("max_sends_per_day", 5):
-            return PolicyDecision(decision=Decision.deny, reasons=["daily outreach cap reached"], policy="outreach")
+            return self._cap("daily outreach cap reached", "outreach")
         return PolicyDecision(decision=Decision.allow, reasons=["outreach policy satisfied"], policy="outreach")
 
 
@@ -208,16 +222,21 @@ class ActionGateway:
         self.engine = engine or PolicyEngine(self.db)
 
     def _approval_granted(self, req: ActionRequest) -> str | None:
-        r = self.db.one("SELECT id FROM approvals WHERE status='granted' AND json_extract(payload_json, '$.idempotency_key')=?",
-                        (req.idempotency_key,))
+        r = self.db.one("SELECT id FROM approvals WHERE status='granted' AND idempotency_key=?", (req.idempotency_key,))
         return r["id"] if r else None
 
     def execute(self, req: ActionRequest, bot: BotConfig, executor: Executor) -> ExternalActionResult:
+        g = self.engine.p.get("global")
         prior = self.db.one("SELECT * FROM external_actions WHERE idempotency_key=?", (req.idempotency_key,))
-        if prior and prior["status"] in ("succeeded", "dry_run"):
+        # only a real success is final. A dry run is a rehearsal: once dry-run is
+        # switched off the same action runs for real.
+        if prior and (prior["status"] == "succeeded" or (prior["status"] == "dry_run" and self.engine.state.dry_run)):
             return ExternalActionResult(id=prior["id"], idempotency_key=req.idempotency_key, action=req.action,
                                         status="duplicate", dry_run=bool(prior["dry_run"]), evidence=prior["evidence"],
                                         result=loads(prior["result_json"], {}) or {})
+        if prior and prior["status"] == "unknown":
+            return ExternalActionResult(id=prior["id"], idempotency_key=req.idempotency_key, action=req.action,
+                                        status="unknown", error=prior["error"])
         # approval can only come from a human decision stored in the approvals table;
         # an agent (or text it was fed) can never assert it.
         attrs = {k: v for k, v in req.attributes.items() if k != "approval_granted"}
@@ -245,7 +264,8 @@ class ActionGateway:
         if decision.decision == Decision.deny:
             record("blocked", error="; ".join(decision.reasons))
             return ExternalActionResult(id=aid, idempotency_key=req.idempotency_key, action=req.action, status="blocked",
-                                        reasons=decision.reasons, error="; ".join(decision.reasons))
+                                        reasons=decision.reasons, error="; ".join(decision.reasons),
+                                        retry_at=decision.retry_at)
         if decision.decision == Decision.require_approval:
             approval_id = self._request_approval(req, decision)
             record("approval_required")
@@ -255,9 +275,22 @@ class ActionGateway:
             record("dry_run", result={"would_execute": req.params}, evidence="dry-run: no external call made")
             return ExternalActionResult(id=aid, idempotency_key=req.idempotency_key, action=req.action, status="dry_run",
                                         dry_run=True, evidence="dry-run: no external call made", reasons=decision.reasons)
+        # reserve the key before calling out, so a concurrent or crashed attempt is visible
+        state = self._reserve(req, aid, decision, g)
+        if state == "in_flight":
+            raise ActionInFlight(f"{req.action} {req.idempotency_key} is already executing")
+        if state == "unknown":
+            msg = ("a previous attempt started but its outcome was never recorded (crash or timeout); "
+                   "check the platform before retrying")
+            record("unknown", error=msg)
+            return ExternalActionResult(id=aid, idempotency_key=req.idempotency_key, action=req.action,
+                                        status="unknown", error=msg, reasons=[msg])
         try:
             out = executor(req)
         except IntegrationError as e:
+            record("failed", error=str(e))
+            raise
+        except PermanentError as e:
             record("failed", error=str(e))
             raise
         except Exception as e:
@@ -272,18 +305,38 @@ class ActionGateway:
         return ExternalActionResult(id=aid, idempotency_key=req.idempotency_key, action=req.action, status="succeeded",
                                     evidence=str(evidence), result=out, reasons=decision.reasons)
 
+    def _reserve(self, req: ActionRequest, aid: str, decision: PolicyDecision, g: dict) -> str:
+        """Mark the action 'executing' under the write lock. Returns 'ok', 'in_flight' or 'unknown'."""
+        t = now()
+        with self.db.tx() as c:
+            r = c.execute("SELECT status, updated_at FROM external_actions WHERE idempotency_key=?",
+                          (req.idempotency_key,)).fetchone()
+            if r and r["status"] == "executing":
+                if t - r["updated_at"] < IN_FLIGHT_STALE_S:
+                    return "in_flight"
+                if req.action in g.get("no_blind_retry", []):
+                    return "unknown"
+            c.execute(
+                "INSERT INTO external_actions(id, idempotency_key, bot_id, action, target, status, dry_run, request_json, "
+                "task_id, created_at, updated_at) VALUES (?,?,?,?,?,'executing',0,?,?,?,?) "
+                "ON CONFLICT(idempotency_key) DO UPDATE SET status='executing', error=NULL, updated_at=excluded.updated_at",
+                (aid, req.idempotency_key, req.bot_id, req.action, req.target,
+                 dumps({"params": req.params, "attributes": req.attributes, "summary": req.summary,
+                        "decision": decision.model_dump()}), req.task_id, t, t))
+        return "ok"
+
     def _request_approval(self, req: ActionRequest, d: PolicyDecision) -> str:
-        r = self.db.one("SELECT id FROM approvals WHERE status='pending' AND json_extract(payload_json, '$.idempotency_key')=?",
-                        (req.idempotency_key,))
+        r = self.db.one("SELECT id FROM approvals WHERE status='pending' AND idempotency_key=?", (req.idempotency_key,))
         if r:
             return r["id"]
         aid = new_id("appr")
         self.db.execute(
-            "INSERT INTO approvals(id, bot_id, action, summary, payload_json, reasons_json, task_id, status, created_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO approvals(id, bot_id, action, summary, payload_json, reasons_json, task_id, status, created_at, "
+            "idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (aid, req.bot_id, req.action, req.summary or f"{req.action} -> {req.target}",
              dumps({"idempotency_key": req.idempotency_key, "target": req.target, "params": req.params,
-                    "attributes": req.attributes}), dumps(d.reasons), req.task_id, "pending", now()))
+                    "attributes": req.attributes}), dumps(d.reasons), req.task_id, "pending", now(),
+             req.idempotency_key))
         return aid
 
 

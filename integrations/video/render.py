@@ -48,7 +48,17 @@ def probe(path: Path) -> dict:
 
 
 def render_reel(scenes: list[dict], out_path: Path, spec: str = "instagram_reel", bg: str = "0x101418",
-                fg: str = "white") -> dict:
+                fg: str = "white", budget_s: float | None = None) -> dict:
+    """budget_s: total seconds allowed (the task's remaining time); each ffmpeg step gets what is left."""
+    import time
+    end = time.monotonic() + (budget_s if budget_s else 1e9)
+
+    def left(cap: float) -> float:
+        rem = end - time.monotonic() - 10
+        if rem <= 5:
+            raise IntegrationError("render ran out of task time")
+        return min(cap, rem)
+
     if not available():
         raise IntegrationError("ffmpeg/ffprobe not installed")
     s = SPECS[spec]
@@ -64,7 +74,7 @@ def render_reel(scenes: list[dict], out_path: Path, spec: str = "instagram_reel"
         cmd = ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c={bg}:s={s['w']}x{s['h']}:d={float(sc.get('duration', 3))}:r=30",
                "-vf", f"drawtext=textfile={tf}:fontcolor={fg}:fontsize=72:line_spacing=18:x=(w-text_w)/2:y=(h-text_h)/2",
                "-c:v", "libx264", "-pix_fmt", "yuv420p", str(part)]
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=left(300))
         if p.returncode != 0:
             raise IntegrationError(f"ffmpeg scene render failed: {p.stderr[:300]}")
         parts.append(part)
@@ -74,12 +84,12 @@ def render_reel(scenes: list[dict], out_path: Path, spec: str = "instagram_reel"
     write_srt(scenes, srt)
     joined = work / "joined.mp4"
     p = subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(joined)],
-                       capture_output=True, text=True, timeout=300)
+                       capture_output=True, text=True, timeout=left(300))
     if p.returncode != 0:
         raise IntegrationError(f"ffmpeg concat failed: {p.stderr[:300]}")
     p = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(joined), "-vf",
                         f"subtitles={srt}:force_style='FontSize=14,MarginV=60'", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                        "-movflags", "+faststart", str(out_path)], capture_output=True, text=True, timeout=600)
+                        "-movflags", "+faststart", str(out_path)], capture_output=True, text=True, timeout=left(600))
     if p.returncode != 0:
         raise IntegrationError(f"ffmpeg subtitle burn failed: {p.stderr[:300]}")
     info = probe(out_path)

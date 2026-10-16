@@ -29,8 +29,7 @@ class WaitingApproval(Exception):
         self.approval_id = approval_id
 
 
-class PermanentError(Exception):
-    """Non-retryable task failure (bad input, policy block)."""
+from ..core.errors import PermanentError  # noqa: E402,F401  (re-exported for agents)
 
 
 class Deferred(Exception):
@@ -56,6 +55,11 @@ class AgentContext:
         self.bot, self.db, self.queue, self.bus = bot, db, queue, bus
         self.gateway, self.router, self.worker_id, self.task = gateway, router, worker_id, task
         self.services = services or {}
+        self._t0 = now()
+
+    def time_left(self) -> float | None:
+        """Seconds before this task's timeout; inner calls cap their own timeouts to it."""
+        return self.task.timeout_s - (now() - self._t0) if self.task else None
 
     # ---- logging / state ----------------------------------------------
     def log(self, message: str, level: str = "info", **data) -> None:
@@ -64,7 +68,7 @@ class AgentContext:
 
     def checkpoint(self, data: dict) -> None:
         if self.task:
-            self.queue.checkpoint(self.task.id, data)
+            self.queue.checkpoint(self.task.id, data, self.worker_id)
             self.task.checkpoint = data
 
     def heartbeat(self) -> None:
@@ -93,7 +97,7 @@ class AgentContext:
     def llm(self, capability: str, prompt: str, system_extra: str = "", max_tokens: int = 1500) -> Completion:
         system = "\n\n".join(s for s in (self.instructions(), UNTRUSTED_PREAMBLE, system_extra) if s)
         return self.router.complete(self.bot, capability, prompt, system=system, max_tokens=max_tokens,
-                                    task_id=self.task.id if self.task else None)
+                                    task_id=self.task.id if self.task else None, time_left=self.time_left())
 
     def has_model(self, capability: str) -> bool:
         return bool(self.router.candidates(self.bot, capability))
@@ -140,17 +144,43 @@ class AgentContext:
         res = self.gateway.execute(req, self.bot, executor)
         if res.status == "approval_required" and wait_on_approval and self.task:
             raise WaitingApproval(res.approval_id or "", res.reasons)
+        if res.status == "blocked" and res.retry_at and self.task:
+            # pause or a daily cap: the block clears by itself, so the task waits instead of finishing
+            raise Deferred(f"{action} held: {'; '.join(res.reasons)}", max(60.0, res.retry_at - now()))
+        if res.status == "unknown":
+            self.notify_owner(f"⚠️ {self.bot.name}: I can't tell whether \"{summary or action}\" went through "
+                              f"(the attempt was interrupted). Please check before I try again. Ref {res.id[-6:]}",
+                              key=f"unknown:{res.id}", urgent=True)
+            raise PermanentError(f"{action} outcome unknown; owner asked to check")
         return res
 
-    def notify_owner(self, text: str, key: str) -> ExternalActionResult | None:
-        tg = self.services.get("telegram")
-        if tg is None:
-            self.log("telegram not configured; notification kept in DB only", level="warning", text=text[:200])
-            return None
+    def notify_owner(self, text: str, key: str, urgent: bool = False, buttons: list | None = None,
+                     force_now: bool = False) -> ExternalActionResult | None:
+        """Tell the owner something. Urgent items go out now (outside quiet hours,
+        under the daily cap); everything else is held for the morning brief.
+        `force_now` is for messages that ARE the batch (brief, summaries) or
+        direct replies the owner is waiting for."""
+        from .. import notifications as nt
         if "telegram.notify_owner" not in self.bot.tools:
             return None
-        res = self.act("telegram.notify_owner", f"tg:{sha(key)[:24]}", lambda r: tg.send_owner(r.params["text"]),
-                       target="owner", params={"text": text}, summary=text[:120], wait_on_approval=False)
+        row, created = nt.register(self.db, self.bot.id, key, text, urgent, buttons)
+        if not created and row["status"] != "held":
+            return None
+        if not (force_now or nt.should_send_now(self.db, urgent)):
+            return None
+        return self.deliver(row["id"], key, text, buttons)
+
+    def deliver(self, nid: str, key: str, text: str, buttons: list | None) -> ExternalActionResult | None:
+        from .. import notifications as nt
+        tg = self.services.get("telegram")
+        if tg is None:
+            self.log("telegram not configured; notification kept for the dashboard", level="debug", text=text[:200])
+            return None
+        res = self.act("telegram.notify_owner", f"tg:{sha(key)[:24]}",
+                       lambda r: tg.send_owner(r.params["text"], buttons=r.params.get("buttons")),
+                       target="owner", params={"text": text, "buttons": buttons}, summary=text[:120], wait_on_approval=False)
+        if res.status in ("succeeded", "dry_run", "duplicate"):
+            nt.mark(self.db, nid, "sent")
         if res.status == "succeeded":
             from ..core.state import set_integration_status
             set_integration_status(self.db, "telegram", "ok", "last send succeeded")

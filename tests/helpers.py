@@ -5,8 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from workforce.agents.base import Agent, AgentContext, PermanentError, register
-from workforce.contracts import MessageType
+from workforce.agents.base import Agent, register
 from workforce.model_router.router import Completion, ModelUnavailable
 from workforce.policies.engine import IntegrationError, IntegrationRevoked
 
@@ -14,10 +13,12 @@ from workforce.policies.engine import IntegrationError, IntegrationRevoked
 class FakeTelegram:
     def __init__(self):
         self.sent: list[str] = []
+        self.buttons: list[list | None] = []
 
-    def send_owner(self, text: str) -> dict:
+    def send_owner(self, text: str, buttons: list | None = None) -> dict:
         self.sent.append(text)
-        return {"evidence": f"fake-telegram-message-{len(self.sent)}"}
+        self.buttons.append(buttons)
+        return {"evidence": f"fake-telegram-message-{len(self.sent)}", "message_id": len(self.sent)}
 
 
 class ScriptedProvider:

@@ -145,7 +145,7 @@ class ContentStudio(Agent):
             raise PermanentError("ffmpeg is not installed on this server")
         set_state(ctx, item["id"], "ASSET_CREATION", "generated backgrounds + text (license: generated)")
         out = Path(get_settings().data_dir) / "media" / f"{item['id']}.mp4"
-        info = render_reel(scenes, out)
+        info = render_reel(scenes, out, budget_s=ctx.time_left())
         asset = {"kind": "video", "path": info["path"], "subtitles": info["subtitles"], "license": "generated-by-noesis",
                  "validated": info["validated"], "problems": info["problems"], "duration": info["duration"],
                  "resolution": f"{info['width']}x{info['height']}"}

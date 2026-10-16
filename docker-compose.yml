@@ -40,16 +40,22 @@ services:
   worker:
     <<: *app
     command: ["python", "-m", "services.worker.main"]
+    # stable id across restarts: a restarted worker hands back its own unfinished tasks at once
+    hostname: noesis-worker
     depends_on: { api: { condition: service_healthy } }
     stop_grace_period: 75s
     healthcheck:
-      test: ["CMD", "python", "-c", "import sqlite3,time,sys; c=sqlite3.connect('/data/noesis.db'); r=c.execute('select max(last_heartbeat) from bots where enabled=1').fetchone()[0]; sys.exit(0 if r and time.time()-r<180 else 1)"]
+      # the OLDEST heartbeat must be fresh: one live bot cannot hide a hung one
+      test: ["CMD", "python", "-c", "import sqlite3,time,sys; c=sqlite3.connect('/data/noesis.db'); r=c.execute('select min(coalesce(last_heartbeat,0)) from bots where enabled=1').fetchone()[0]; sys.exit(0 if r and time.time()-r<240 else 1)"]
       interval: 60s
       timeout: 10s
       retries: 3
       start_period: 60s
     deploy:
-      resources: { limits: { memory: 768M, cpus: "1.0" } }
+      # isolated mode runs one process per bot: ~380 MB idle for all ten (measured),
+      # plus ffmpeg while rendering. On a 1 GB VPS set NOESIS_WORKER_MODE=shared in .env
+      # (one process for all bots) and lower this to 512M.
+      resources: { limits: { memory: 1G, cpus: "1.0" } }
 
   scheduler:
     <<: *app
@@ -68,6 +74,12 @@ services:
     <<: *app
     command: ["python", "-m", "services.telegram.bot"]
     depends_on: { api: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3,time,sys; c=sqlite3.connect('/data/noesis.db'); r=c.execute(\"select value from system_state where key='telegram_heartbeat'\").fetchone(); sys.exit(0 if r and time.time()-float(r[0])<180 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     deploy:
       resources: { limits: { memory: 128M, cpus: "0.25" } }
 

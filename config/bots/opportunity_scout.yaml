@@ -9,7 +9,6 @@ publish_topics: [opportunity.verified]
 model: {default_capability: extract, allowed_tiers: [none, cheap], daily_call_limit: 200, daily_budget_usd: 0.10}
 schedules:
   - {name: source_sweep, kind: sweep_sources, every: 15m}
-  - {name: deadline_digest, kind: deadline_digest, at: "08:30"}
 max_concurrency: 4
 task_timeout_s: 600
 settings:

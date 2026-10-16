@@ -33,11 +33,25 @@ class PersonalOpsAgent(Agent):
         return {"cancelled": n}
 
     def send_due(self, ctx: AgentContext, task: Task) -> dict:
+        from .. import notifications as nt
         due = ctx.db.all("SELECT * FROM reminders WHERE status='pending' AND due_at<=? ORDER BY due_at LIMIT 20", (now(),))
         sent = 0
         for r in due:
-            res = ctx.notify_owner(f"🔔 Reminder: {r['title']}", key=f"reminder:{r['id']}")
-            if res is None or res.status in ("succeeded", "dry_run", "duplicate"):
+            # a reminder you set yourself arrives at the time you chose, even in quiet hours;
+            # automatic deadline reminders wait for quiet hours to end
+            mine = r["source"] in ("owner", "telegram", "dashboard", "user")
+            res = ctx.notify_owner(f"🔔 Reminder: {r['title']}", key=f"reminder:{r['id']}", urgent=True, force_now=mine)
+            # only a real delivery (or a dry-run rehearsal of one) marks it sent; otherwise it stays
+            # pending and the next sweep tries again
+            if res is not None and res.status in ("succeeded", "dry_run", "duplicate"):
                 ctx.db.execute("UPDATE reminders SET status='sent' WHERE id=?", (r["id"],))
                 sent += 1
-        return {"due": len(due), "sent": sent}
+        # urgent items that were held (quiet hours, daily cap, or registered by a service
+        # without Telegram access) go out as soon as they are allowed to
+        flushed = 0
+        for n in nt.held(ctx.db, urgent_only=True, limit=10):
+            if not nt.should_send_now(ctx.db, True):
+                break
+            res = ctx.deliver(n["id"], n["key"], n["text"], n["buttons"])
+            flushed += int(res is not None and res.status in ("succeeded", "dry_run", "duplicate"))
+        return {"due": len(due), "sent": sent, "flushed": flushed}

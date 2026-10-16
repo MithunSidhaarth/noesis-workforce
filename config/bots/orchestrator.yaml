@@ -9,6 +9,7 @@ publish_topics: [workforce.broadcast]
 subscribe_topics: [opportunity.verified, application.ready, content.ready, alerts]
 model: {default_capability: summarize, allowed_tiers: [none, cheap], daily_call_limit: 30}
 schedules:
+  - {name: morning_brief, kind: morning_brief, at: "08:00"}
   - {name: daily_summary, kind: daily_summary, at: "21:00"}
   - {name: weekly_summary, kind: weekly_summary, at: "18:00", weekdays: sun}
 max_concurrency: 4

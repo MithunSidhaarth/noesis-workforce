@@ -174,6 +174,7 @@ class PolicyDecision(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     dry_run: bool = False
     policy: str = ""
+    retry_at: float | None = None     # set when the block clears on its own (pause lifted, daily cap resets)
 
     @property
     def allowed(self) -> bool:
@@ -196,13 +197,14 @@ class ExternalActionResult(BaseModel):
     id: str
     idempotency_key: str
     action: str
-    status: Literal["succeeded", "failed", "dry_run", "blocked", "approval_required", "duplicate"]
+    status: Literal["succeeded", "failed", "dry_run", "blocked", "approval_required", "duplicate", "unknown"]
     dry_run: bool = False
     evidence: str | None = None
     result: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
     approval_id: str | None = None
     reasons: list[str] = Field(default_factory=list)
+    retry_at: float | None = None
 
 
 class Approval(BaseModel):

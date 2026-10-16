@@ -109,7 +109,8 @@ docker compose exec api python scripts/noesisctl.py test-telegram   # sends you 
 ```
 
 4. Send `/start` to your bot, then `/status`. Messages from any other account
-   are ignored.
+   are ignored. From now on you get one morning brief at 08:00, urgent pings
+   only when something can't wait, and buttons on approvals and matches.
 
 ## 9. Configure authorized integrations
 
@@ -180,4 +181,6 @@ docker compose up -d --no-build
 | Turn dry-run off when ready | Settings → Dry-run, or `noesisctl.py dry-run off` |
 | Run something now | `docker compose exec api python scripts/noesisctl.py run opportunity_scout sweep_sources` |
 | Approve from the shell | `noesisctl.py approvals`, `noesisctl.py approve <id>` |
-| Disk usage | logs rotate at 3 × 10 MB per service; backups keep 14 |
+| Check everything | `docker compose exec api python scripts/noesisctl.py doctor` |
+| Add a profile fact | Telegram `/profile set graduation_year 2027` (or Settings → Your profile) |
+| Disk usage | logs rotate at 3 × 10 MB per service; backups keep 14; the database prunes itself nightly |

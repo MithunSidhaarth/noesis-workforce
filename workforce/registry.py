@@ -76,8 +76,12 @@ class BotRegistry:
             row = self.db.one("SELECT id FROM schedules WHERE id=?", (sid,))
             if row:
                 self.db.execute(
-                    "UPDATE schedules SET kind=?, payload_json=?, every_s=?, at_time=?, weekdays=?, tz=?, allow_overlap=?, enabled=? WHERE id=?",
-                    (s.kind, dumps(s.payload), every, s.at, s.weekdays, get_settings().timezone, int(s.allow_overlap), int(s.enabled), sid))
+                    # a changed time or interval re-plans the next run
+                    "UPDATE schedules SET next_run=CASE WHEN at_time IS NOT ? OR every_s IS NOT ? OR weekdays IS NOT ? "
+                    "THEN NULL ELSE next_run END, kind=?, payload_json=?, every_s=?, at_time=?, weekdays=?, tz=?, "
+                    "allow_overlap=?, enabled=? WHERE id=?",
+                    (s.at, every, s.weekdays, s.kind, dumps(s.payload), every, s.at, s.weekdays, get_settings().timezone,
+                     int(s.allow_overlap), int(s.enabled), sid))
             else:
                 self.db.execute(
                     "INSERT INTO schedules(id, bot_id, name, kind, payload_json, every_s, at_time, weekdays, tz, allow_overlap, enabled) "

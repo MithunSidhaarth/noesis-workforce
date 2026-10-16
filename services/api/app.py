@@ -13,7 +13,6 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -22,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from workforce.contracts import TaskSpec
 from workforce.core.db import Database, get_db, loads
-from workforce.core.queue import QueueError, TaskQueue
+from workforce.core.queue import TaskQueue
 from workforce.core.settings import ROOT
 from workforce.core.state import SystemState, audit
 from workforce.core.util import new_id, now
@@ -137,7 +136,11 @@ def overview():
         "tasks_24h": {r["status"]: r["n"] for r in d.all("SELECT status, COUNT(*) n FROM tasks WHERE updated_at>? GROUP BY status", (day,))},
         "opportunities_24h": d.scalar("SELECT COUNT(*) FROM opportunities WHERE discovered_at>?", (day,)),
         "upcoming_deadlines": rows("SELECT id, title, deadline, verification_status, application_status FROM opportunities "
-                                   "WHERE deadline > ? AND application_status NOT IN ('SUBMITTED','CLOSED') ORDER BY deadline LIMIT 6", (now(),)),
+                                   "WHERE deadline > ? AND application_status NOT IN ('SUBMITTED','CLOSED') "
+                                   "AND verification_status!='failed' ORDER BY deadline LIMIT 6", (now(),)),
+        "held_notifications": d.scalar("SELECT COUNT(*) FROM notifications WHERE status='held'"),
+        "unknown_actions": d.scalar("SELECT COUNT(*) FROM external_actions WHERE status='unknown'"),
+        "waiting_on_you": d.scalar("SELECT COUNT(*) FROM applications WHERE state IN ('PREPARATION','REVIEW') AND missing_json!='[]'"),
         "spend_today_usd": d.scalar("SELECT COALESCE(SUM(cost_usd),0) FROM model_usage WHERE ts>?", (day,)),
         "integrations": rows("SELECT * FROM integrations ORDER BY name"),
         "recent_activity": rows("SELECT ts, level, bot_id, message FROM exec_log ORDER BY id DESC LIMIT 15"),
@@ -251,15 +254,59 @@ def objective(body: Objective):
 def opportunities(limit: int = 200):
     return rows("SELECT id, title, organizer, official_url, discovery_source, type, remote_status, deadline, deadline_text, deadline_tz, "
                 "relevance_score, relevance_rationale, verification_status, verification_notes_json, eligibility_status, application_status, "
-                "eligibility_json, required_materials_json, discovered_at, last_verified, note_path FROM opportunities "
+                "eligibility_json, required_materials_json, discovered_at, last_verified, note_path, confirmed_by, skip_reason, "
+                "estimated_effort, json_extract(raw_json, '$.candidate_links') candidate_links FROM opportunities "
                 "ORDER BY discovered_at DESC LIMIT ?", (min(limit, 1000),),
-                ("verification_notes_json", "eligibility_json", "required_materials_json"))
+                ("verification_notes_json", "eligibility_json", "required_materials_json", "candidate_links"))
+
+
+class OppConfirm(BaseModel):
+    url: str | None = Field(default=None, max_length=1000)
+
+
+class OppSkip(BaseModel):
+    reason: str = Field(default="", max_length=200)
+
+
+def _owner_action(fn, *args, **kw):
+    from workforce.owner_actions import OwnerActionError
+    try:
+        return fn(get_db(), *args, **kw)
+    except OwnerActionError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/opportunities/{opp_id}/confirm", dependencies=[Owner])
+def opp_confirm(opp_id: str, body: OppConfirm):
+    from workforce.owner_actions import confirm_opportunity
+    r = _owner_action(confirm_opportunity, opp_id, by="dashboard", url=body.url or None)
+    return {"id": r["opportunity"]["id"], "queued": r["queued"]}
+
+
+@app.post("/api/opportunities/{opp_id}/skip", dependencies=[Owner])
+def opp_skip(opp_id: str, body: OppSkip):
+    from workforce.owner_actions import skip_opportunity
+    return {"id": _owner_action(skip_opportunity, opp_id, by="dashboard", reason=body.reason)["id"]}
+
+
+@app.post("/api/opportunities/{opp_id}/remind", dependencies=[Owner])
+def opp_remind(opp_id: str):
+    from workforce.owner_actions import remind_opportunity
+    _, n = _owner_action(remind_opportunity, opp_id, by="dashboard")
+    return {"reminders_created": n}
 
 
 @app.get("/api/sources", dependencies=[Owner])
 def sources():
-    return rows("SELECT id, name, kind, url, access_method, interval_s, enabled, reliability, consecutive_failures, last_checked, "
-                "last_success, last_error, next_check, items_seen FROM sources ORDER BY name")
+    # yield per source: how many listings it found, how many checked out, how many you took further
+    return rows("SELECT s.id, s.name, s.kind, s.url, s.access_method, s.interval_s, s.enabled, s.reliability, s.consecutive_failures, "
+                "s.last_checked, s.last_success, s.last_error, s.next_check, s.items_seen, COUNT(o.id) found, "
+                "SUM(CASE WHEN o.verification_status='verified' THEN 1 ELSE 0 END) verified, "
+                "SUM(CASE WHEN o.confirmed_by IS NOT NULL THEN 1 ELSE 0 END) confirmed, "
+                "SUM(CASE WHEN o.application_status IN ('SUBMITTED','FOLLOW_UP') OR a.evidence IS NOT NULL THEN 1 ELSE 0 END) applied, "
+                "SUM(CASE WHEN o.skip_reason IS NOT NULL THEN 1 ELSE 0 END) skipped "
+                "FROM sources s LEFT JOIN opportunities o ON o.discovery_source=s.id LEFT JOIN applications a ON a.opportunity_id=o.id "
+                "GROUP BY s.id ORDER BY s.name")
 
 
 @app.get("/api/applications", dependencies=[Owner])
@@ -279,6 +326,48 @@ def app_submitted(app_id: str, body: Confirmation):
         return record_manual_submission(get_db(), app_id, body.confirmation, by="dashboard")
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+
+class Outcome(BaseModel):
+    outcome: str = Field(pattern=r"^(accepted|rejected|no_response|withdrawn)$")
+
+
+@app.post("/api/applications/{app_id}/outcome", dependencies=[Owner])
+def app_outcome(app_id: str, body: Outcome):
+    from workforce.owner_actions import record_outcome
+    return _owner_action(record_outcome, app_id, body.outcome, by="dashboard")
+
+
+@app.get("/api/notifications", dependencies=[Owner])
+def notifications(status: str = "held", limit: int = 100):
+    return rows("SELECT id, key, bot_id, text, urgent, status, created_at, sent_at FROM notifications WHERE status=? "
+                "ORDER BY created_at DESC LIMIT ?", (status, min(limit, 500)))
+
+
+class Fact(BaseModel):
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{1,40}$")
+    value: str = Field(min_length=1, max_length=2000)
+
+
+@app.get("/api/profile", dependencies=[Owner])
+def profile():
+    from workforce.owner_actions import missing_summary
+    from workforce.sources.registry import load_profile, profile_problems
+    p = load_profile()
+    facts = []
+    for sec in ("facts", "answers"):
+        for k, v in (p.get(sec) or {}).items():
+            if isinstance(v, dict) and v.get("value") not in (None, ""):
+                facts.append({"section": sec, "key": k, "verified": bool(v.get("verified")), "source": v.get("source", "profile.yaml"),
+                              "value": "•••" if v.get("sensitive") else str(v["value"])[:300]})
+    return {"facts": facts, "problems": profile_problems(p),
+            "missing": [{"item": i, "applications": n, "how": h} for i, n, h in missing_summary(get_db())]}
+
+
+@app.post("/api/profile", dependencies=[Owner])
+def profile_set(f: Fact):
+    from workforce.owner_actions import set_profile_fact
+    return _owner_action(set_profile_fact, f.key, f.value, by="dashboard")
 
 
 @app.post("/api/applications/{app_id}/submit", dependencies=[Owner])

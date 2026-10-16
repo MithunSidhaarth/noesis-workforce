@@ -33,14 +33,27 @@ class TelegramClient:
             raise IntegrationError(f"telegram error {r.status_code}: {data.get('description', '')[:200]}")
         return data["result"]
 
-    def send(self, chat_id: int, text: str) -> dict:
+    def send(self, chat_id: int, text: str, buttons: list | None = None) -> dict:
+        """buttons: rows of {"text", "data"} rendered as an inline keyboard on the last chunk."""
         res = None
-        for i in range(0, max(1, len(text)), MAX_LEN):
-            res = self._call("sendMessage", chat_id=chat_id, text=text[i:i + MAX_LEN], disable_web_page_preview=True)
+        chunks = [text[i:i + MAX_LEN] for i in range(0, max(1, len(text)), MAX_LEN)]
+        for n, chunk in enumerate(chunks):
+            extra = {}
+            if buttons and n == len(chunks) - 1:
+                extra["reply_markup"] = {"inline_keyboard": [[{"text": b["text"], "callback_data": b["data"][:64]} for b in row]
+                                                             for row in buttons]}
+            res = self._call("sendMessage", chat_id=chat_id, text=chunk, disable_web_page_preview=True, **extra)
         return res or {}
 
-    def send_owner(self, text: str) -> dict:
-        res = self.send(self.owner_id, text)
+    def answer_callback(self, callback_id: str, text: str = "") -> dict:
+        return self._call("answerCallbackQuery", callback_query_id=callback_id, text=text[:190])
+
+    def edit_message(self, chat_id: int, message_id: int, text: str) -> dict:
+        return self._call("editMessageText", chat_id=chat_id, message_id=message_id, text=text[:MAX_LEN],
+                          disable_web_page_preview=True)
+
+    def send_owner(self, text: str, buttons: list | None = None) -> dict:
+        res = self.send(self.owner_id, text, buttons)
         return {"evidence": f"telegram message_id={res.get('message_id')}", "message_id": res.get("message_id")}
 
     def get_updates(self, offset: int | None, timeout: int = 30) -> list[dict]:

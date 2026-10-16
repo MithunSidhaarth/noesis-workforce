@@ -19,7 +19,6 @@ import time
 
 from workforce.core.db import get_db
 from workforce.core.notify import subscribe
-from workforce.core.settings import get_settings
 from workforce.core.state import configure_logging, exec_log
 
 
@@ -44,13 +43,24 @@ async def run_runtimes(bot_ids: list[str]) -> None:
 
 def _child(bot_id: str) -> None:
     configure_logging()
-    os.environ["NOESIS_WORKER_ID"] = f"{get_settings().worker_id}-{bot_id}"
     asyncio.run(run_runtimes([bot_id]))
 
 
-def supervise(bot_ids: list[str]) -> None:
+WATCHDOG_S = 180      # a live process whose bot has not heartbeated for this long is hung
+RESCAN_S = 30         # pick up bots enabled/disabled from the dashboard without a restart
+
+
+def _stale(bot_id: str, started: float) -> bool:
+    if time.time() - started < WATCHDOG_S:
+        return False
+    hb = get_db().scalar("SELECT last_heartbeat FROM bots WHERE id=?", (bot_id,))
+    return hb is None or time.time() - hb > WATCHDOG_S
+
+
+def supervise(bot_ids: list[str], only: list[str] | None = None) -> None:
     procs: dict[str, tuple[mp.Process, float, int]] = {}
     stopping = False
+    last_scan = time.time()
 
     def _stop(*_):
         nonlocal stopping
@@ -63,12 +73,31 @@ def supervise(bot_ids: list[str]) -> None:
     restarts: dict[str, int] = {b: 0 for b in bot_ids}
     next_start: dict[str, float] = {b: 0 for b in bot_ids}
     while not stopping:
+        if time.time() - last_scan > RESCAN_S:
+            last_scan = time.time()
+            try:
+                wanted = enabled_bots(only)
+            except Exception:  # noqa: BLE001
+                wanted = bot_ids
+            for b in [b for b in procs if b not in wanted]:
+                exec_log(get_db(), "info", "bot disabled; stopping its process", bot_id=b)
+                procs.pop(b)[0].terminate()
+            for b in wanted:
+                restarts.setdefault(b, 0)
+                next_start.setdefault(b, 0)
+            bot_ids = wanted
         for b in bot_ids:
             cur = procs.get(b)
             if cur and cur[0].is_alive():
-                if time.time() - cur[1] > 600:
+                if _stale(b, cur[1]):
+                    exec_log(get_db(), "error", f"bot heartbeat older than {WATCHDOG_S}s; killing the hung process", bot_id=b)
+                    cur[0].kill()
+                    cur[0].join(timeout=10)
+                elif time.time() - cur[1] > 600:
                     restarts[b] = 0  # healthy for 10 min -> reset backoff
-                continue
+                    continue
+                else:
+                    continue
             if cur:
                 restarts[b] += 1
                 delay = min(300, 2 ** restarts[b])
@@ -89,10 +118,12 @@ def main() -> None:
     ap.add_argument("--bots", default="")
     ap.add_argument("--shared", action="store_true")
     a = ap.parse_args()
+    a.shared = a.shared or os.environ.get("NOESIS_WORKER_MODE", "isolated").lower() == "shared"
     configure_logging()
     from workforce.factory import bootstrap
     bootstrap()
-    ids = enabled_bots([b for b in a.bots.split(",") if b])
+    only = [b for b in a.bots.split(",") if b] or None
+    ids = enabled_bots(only)
     if not ids:
         print("no enabled bots", file=sys.stderr)
         sys.exit(1)
@@ -100,7 +131,7 @@ def main() -> None:
         asyncio.run(run_runtimes(ids))
     else:
         mp.set_start_method("spawn", force=True)
-        supervise(ids)
+        supervise(ids, only)
 
 
 if __name__ == "__main__":

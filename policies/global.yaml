@@ -21,6 +21,21 @@ dry_run_exempt:
   - telegram.notify_owner
   - vault.write
 
+# The emergency pause stops every other side effect, but you still need to hear
+# about approvals and failures while paused.
+pause_exempt:
+  - telegram.notify_owner
+
+# Actions where sending twice is harmful. If a previous attempt started but its
+# outcome was never recorded (crash or timeout mid-call), it is marked
+# 'unknown' and you are asked to check, instead of being sent again.
+no_blind_retry:
+  - email.send
+  - outreach.send
+  - social.publish
+  - application.submit
+  - calendar.send_invite
+
 # Any action whose attributes.flags contain one of these always needs a human.
 always_require_approval:
   - payment

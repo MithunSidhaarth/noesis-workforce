@@ -26,12 +26,13 @@ export default function Overview() {
           <Button type="submit" variant="primary">Send objective</Button>
         </form>
       </Card>
+      {!!data?.unknown_actions && <div className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-800 dark:bg-rose-950 dark:text-rose-200">{data.unknown_actions} action(s) were interrupted and their outcome is unknown. Check them on the <Link href="/logs" className="underline">Logs</Link> page before anything is retried.</div>}
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Queued" value={(q.queued ?? 0) + (q.pending ?? 0)} hint={`${q.running ?? 0} running`} />
         <Stat label="Waiting approval" value={data?.pending_approvals ?? "…"} tone={data?.pending_approvals ? "amber" : undefined} />
         <Stat label="Succeeded 24h" value={t24.succeeded ?? 0} />
         <Stat label="Failed 24h" value={(t24.failed ?? 0) + (t24.dead ?? 0)} tone={(t24.dead ?? 0) > 0 ? "red" : undefined} hint={`${t24.dead ?? 0} dead-lettered`} />
-        <Stat label="New opportunities" value={data?.opportunities_24h ?? "…"} hint="last 24h" />
+        <Stat label="Waiting on your info" value={data?.waiting_on_you ?? "…"} hint={<Link href="/settings#profile" className="hover:underline">fill gaps →</Link>} tone={data?.waiting_on_you ? "amber" : undefined} />
         <Stat label="Model spend today" value={`$${(data?.spend_today_usd ?? 0).toFixed(3)}`} />
       </div>
       <div className="grid gap-6 xl:grid-cols-3">
@@ -50,7 +51,7 @@ export default function Overview() {
               <ul className="space-y-2 text-sm">
                 {data.upcoming_deadlines.map((o: any) => (
                   <li key={o.id} className="flex items-start justify-between gap-2">
-                    <span className="line-clamp-2">{o.title}</span>
+                    <Link href={`/opportunities?id=${o.id}`} className="line-clamp-2 hover:underline">{o.title}</Link>
                     <span className="shrink-0 text-xs text-zinc-500" title={fmtTime(o.deadline)}>{until(o.deadline)}</span>
                   </li>
                 ))}

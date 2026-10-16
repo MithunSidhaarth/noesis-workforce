@@ -7,4 +7,6 @@ tools: [application.submit, telegram.notify_owner]
 can_message: [quality, orchestrator, personal_ops, opportunity_scout]
 publish_topics: [application.ready]
 model: {default_capability: write, allowed_tiers: [none, cheap, standard], daily_call_limit: 40, daily_budget_usd: 0.15}
+schedules:
+  - {name: follow_up_sweep, kind: follow_up_sweep, at: "10:00"}
 max_concurrency: 2

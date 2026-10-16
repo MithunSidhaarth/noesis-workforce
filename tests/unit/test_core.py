@@ -1,7 +1,6 @@
 """Core runtime: queue, messaging, delegation, dependencies, concurrency,
 recovery, retries, dead letters, disabled bots, scheduling."""
 import asyncio
-import threading
 import time
 
 import pytest
@@ -9,9 +8,9 @@ import pytest
 from tests.helpers import CONCURRENCY
 from workforce.contracts import Message, MessageType, TaskSpec
 from workforce.core.queue import BotDisabled, DelegationLimit, TaskQueue
-from workforce.messaging.bus import MessageBus, MessageRejected
+from workforce.messaging.bus import MessageRejected
 from workforce.registry import BotRegistry
-from workforce.runtime import BotRuntime, Services
+from workforce.runtime import BotRuntime
 from workforce.scheduler import Scheduler, next_run
 
 

@@ -19,8 +19,12 @@ below hold even if a model ignores its prompt.
 | Prompt injection | external text is wrapped in `<untrusted>` with a preamble; model output can only *propose*, the gateway decides | `test_prompt_injection_cannot_override_permissions` |
 | Mandatory approvals | payments, purchases, legal declarations, sensitive disclosures, unusual/irreversible commitments, unverified facts (`policies/global.yaml`) | `test_email_policy_blocks_unauthorized_send_and_requires_approval` |
 | Dry-run | global switch, on by default; only Telegram messages to you and vault writes are exempt | `test_dry_run_prevents_real_side_effects` |
-| Emergency pause | `/pause`, dashboard or CLI; blocks every external action at the gateway. Bots keep doing internal work and queued work is preserved | `test_emergency_pause_blocks_external_actions` |
-| No duplicate sends/posts | idempotency key per action; duplicate returns the earlier result | `test_duplicate_messages_do_not_duplicate_external_actions` |
+| Emergency pause | `/pause`, dashboard or CLI; blocks every external action at the gateway except messages to you. The task that hit the pause waits and resumes after `/resume`; nothing is marked done | `test_emergency_pause_blocks_external_actions`, `test_paused_work_waits_and_resumes_instead_of_being_dropped` |
+| Daily caps | a cap (posts, emails, outreach) defers the task to the next day instead of dropping it | `test_daily_cap_defers_until_tomorrow` |
+| No duplicate sends/posts | idempotency key per action; only a real success is final (a dry-run rehearsal does not block the real run later) | `test_duplicate_messages_do_not_duplicate_external_actions`, `test_dry_run_rehearsal_does_not_block_the_real_run_later` |
+| No blind re-sends after a crash | the key is reserved as `executing` before the provider is called. A concurrent attempt waits; an attempt interrupted mid-call (crash, timeout) becomes `unknown` for email, outreach, publishing, submissions and invites, and you are asked to check instead of it being sent again | `test_interrupted_send_is_never_blindly_repeated` |
+| Owner actions by button | Telegram inline buttons (approve/deny, prepare/remind/skip) pass the same numeric-owner + private-chat check as typed commands; every tap is audited | `test_approval_is_pushed_with_buttons_and_decided_by_tap` |
+| Owner-typed facts | `/profile set` facts count as verified because you typed them; sensitive keys are masked in replies and their values never go to the audit log | `test_profile_facts_typed_by_owner_are_used_and_refresh_applications` |
 | Messaging abuse | sender permissions, topic ACLs, hop limit 12, same edge ≤ 6 times per chain, 256 KB payload cap | `test_message_schema_and_permissions`, `test_loop_detection_stops_ping_pong` |
 | Runaway delegation | `max_delegation_depth` per bot | `test_delegation_depth_limit` |
 | Runaway cost | per-bot call and USD limits, global daily USD cap | `test_usage_budgets_prevent_unbounded_model_calls` |
@@ -54,11 +58,16 @@ every write to `99 System/Workforce/changelog.md`.
 
 | Situation | What happens / what to do |
 |---|---|
-| A bot process crashes | supervisor restarts it with exponential backoff (2 s → 5 min); its leased task is reclaimed by the scheduler and retried. Verified by killing a bot process in the running stack. |
+| A bot process crashes | supervisor restarts it with exponential backoff (2 s → 5 min); the restarted process hands back its unfinished tasks at once (stable worker id). Verified by killing a bot process in the running stack. |
+| A bot hangs | the supervisor kills a bot process whose heartbeat is older than 3 minutes and restarts it; the container healthcheck uses the *oldest* bot heartbeat. A task that times out keeps its concurrency slot until its thread really ends; too many of those restarts the process. |
+| Work gets stuck | approvals expire after 72 h (`NOESIS_APPROVAL_TTL_H`) and the waiting task is cancelled; a schedule skipped 3 times in a row alerts you; a bot that dies after startup alerts you once a day. |
+| Database grows | nightly retention: logs 30 days, processed messages 14, finished tasks 90, notifications 60, model usage 400; `audit_log` and `external_actions` are kept as the evidence trail. `noesisctl.py prune` runs it now. |
+| An action's outcome is unknown | the dashboard shows a red banner and the morning brief lists it. Check the platform (sent folder, post, form confirmation), then decide; it is never retried automatically. |
 | Server reboot | `restart: unless-stopped`; all state is in `data/noesis.db`; queued work resumes. |
 | Provider outage | task retries with backoff and dead-letters after `max_attempts`; you get one Telegram alert; nothing is marked successful. |
 | Credential revoked | task fails without retry, integration shows **revoked** in the dashboard, you get an alert. Re-authorize, then retry the dead task from the Tasks page. |
-| Something is misbehaving | `/pause` in Telegram (or Settings → Pause all bots). Queued work is kept. Investigate in Logs & audit, then `/resume`. |
+| Something is misbehaving | `/pause` in Telegram (or Settings → Pause all bots). Work that needs an external action waits; you still get alerts. Investigate in Logs & audit, then `/resume`. |
+| Not sure what's wrong | `docker compose exec api python scripts/noesisctl.py doctor` prints every check with what to fix. |
 | Bad deploy | roll back (docs/DEPLOYMENT.md §12). |
 | Data loss | restore the nightly backup (docs/DEPLOYMENT.md §10). |
 | Leaked secret | rotate it at the provider, update `.env`, `docker compose up -d`. For the dashboard: new password hash and a new `NOESIS_SESSION_SECRET` (this signs out every session). |

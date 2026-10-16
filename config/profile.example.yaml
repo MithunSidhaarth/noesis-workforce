@@ -1,19 +1,26 @@
-# Your VERIFIED profile. The Applications Agent only uses facts listed under
-# `facts` with `verified: true`. Anything missing is requested from you; it is
-# never invented. Copy to config/profile.yaml (git-ignored) and fill it in.
+# Your VERIFIED profile. Copy to config/profile.yaml (git-ignored) and fill it in.
+# The Applications Agent only uses entries with `verified: true`; anything
+# missing is asked of you, never invented. You can also add facts from Telegram
+# with `/profile set <key> <value>` (those count as verified because you typed
+# them) and see what applications are waiting on with `/missing`.
 name: ""
 email: ""
 timezone: Asia/Kolkata
-facts: {}
-#  degree:          {value: "B.E. Computer Science", verified: true}
-#  institution:     {value: "...", verified: true}
-#  graduation_year: {value: 2027, verified: true}
-#  citizenship:     {value: "India", verified: true}
-#  location:        {value: "Bengaluru, India", verified: true}
-#  date_of_birth:   {value: "...", verified: true, sensitive: true}
-answers: {}
-#  short_bio:   {value: "...", verified: true}
-#  why_ai:      {value: "...", verified: true}
+
+facts:
+  degree:          {value: "", verified: false}   # e.g. "B.E. Computer Science"
+  institution:     {value: "", verified: false}
+  graduation_year: {value: "", verified: false}   # e.g. 2027
+  student_status:  {value: "", verified: false}   # e.g. "undergraduate, 3rd year"
+  citizenship:     {value: "", verified: false}   # e.g. "India"
+  location:        {value: "", verified: false}   # e.g. "Bengaluru, India"
+  age:             {value: "", verified: false}
+  # date_of_birth: {value: "", verified: false, sensitive: true}
+
+answers:
+  short_bio:       {value: "", verified: false}   # 2-3 sentences, used in most forms
+  why_ai:          {value: "", verified: false}
+
 documents: {}
 #  resume: {path: "documents/resume.pdf", verified: true}
 
@@ -22,3 +29,9 @@ interests: [ai, machine learning, agents, llm, software engineering, hackathon, 
 preferred_types: [hackathon, fellowship, internship, grant, competition, scholarship, conference]
 preferred_locations: [india, bengaluru, bangalore, remote, online, global]
 exclude_keywords: [phd only, postdoc, senior, 10+ years]
+
+# How often you hear from the workforce on Telegram.
+notifications:
+  quiet_hours: "23:00-07:30"     # nothing non-essential in this window ("off" to disable)
+  max_immediate_per_day: 8       # urgent pings per day; everything else goes in the morning brief
+  morning_brief: "08:00"         # set in config/bots/orchestrator.yaml

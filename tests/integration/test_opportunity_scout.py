@@ -91,16 +91,28 @@ def test_scout_end_to_end(scout_env):
     assert "verified profile facts (config/profile.yaml)" in missing and "resume" in missing
     assert db.scalar("SELECT COUNT(*) FROM applications") == 1  # only verified ones proceed
 
-    # reminders scheduled via Personal Ops through bot-to-bot delegation
-    assert db.scalar("SELECT COUNT(*) FROM reminders WHERE ref_id=?", (app["id"],)) == 2
+    # deadline reminders at T-7, T-2 and T-1, each with the link
+    rems = db.all("SELECT * FROM reminders WHERE ref_id=? ORDER BY due_at", (fel["id"],))
+    assert len(rems) == 3 and all("https://example.org/fellowship" in r["title"] for r in rems)
+    assert {r["dedupe_key"].rsplit(":", 1)[1] for r in rems} == {"7", "2", "1"}
 
     # message trail is typed and correlated
     types = {m["type"] for m in db.all("SELECT type FROM messages")}
     assert {"VERIFICATION_REQUEST", "VERIFICATION_RESULT", "TASK_REQUEST", "TASK_ACCEPTED", "TASK_RESULT", "RESEARCH_FINDING"} <= types
 
-    # Telegram (fake) got the high-value alert, once
+    # the match is not urgent (closes in 20 days), so it is held for the morning brief, not pinged
+    alert = db.one("SELECT * FROM notifications WHERE key=?", (f"opp:{fel['id']}",))
+    assert alert["status"] == "held" and not alert["urgent"]
+    assert "Closes in 2" in alert["text"] and "Looks official" in alert["text"] and f"Ref {fel['id'][-6:]}" in alert["text"]
+    assert {b["text"] for b in loads(alert["buttons_json"])[0]} == {"✅ Prepare", "⏰ Remind me", "✖ Not for me"}
     sent = services.extra["telegram"].sent
-    assert sum("AI Research Fellowship" in s and "New fellowship" in s for s in sent) == 1
+    assert not any("AI Research Fellowship" in s for s in sent)
+    # the morning brief carries it, with a typeable command, and marks it digested
+    services.queue.enqueue(TaskSpec(bot_id="orchestrator", kind="morning_brief", requested_by="scheduler"))
+    run_all(services)
+    brief = [s for s in services.extra["telegram"].sent if "Morning brief" in s]
+    assert len(brief) == 1 and "AI Research Fellowship" in brief[0] and "/opp" in brief[0]
+    assert db.scalar("SELECT status FROM notifications WHERE key=?", (f"opp:{fel['id']}",)) == "digested"
 
     # NOESIS note written with frontmatter, unknowns marked
     note = Path(env.vault) / fel["note_path"]
@@ -117,7 +129,7 @@ def test_scout_end_to_end(scout_env):
     services.queue.enqueue(TaskSpec(bot_id="opportunity_scout", kind="sweep_sources", idempotency_key="again"))
     run_all(services)
     assert db.scalar("SELECT COUNT(*) FROM opportunities") == 4
-    assert sum("AI Research Fellowship" in s and "New fellowship" in s for s in services.extra["telegram"].sent) == 1
+    assert db.scalar("SELECT COUNT(*) FROM notifications WHERE key LIKE 'opp:%'") == 2   # fellowship + hackathon, once each
 
 
 def test_source_failure_is_tracked(scout_env):
@@ -138,4 +150,4 @@ def test_source_failure_is_tracked(scout_env):
         BotRuntime("opportunity_scout", services, "it").step()
         BotRuntime("opportunity_scout", services, "it").step()
     assert env.db.scalar("SELECT consecutive_failures FROM sources WHERE id='fixture_feed'") == 3
-    assert sum("failed 3 times" in m for m in services.extra["telegram"].sent) == 1
+    assert env.db.scalar("SELECT COUNT(*) FROM notifications WHERE text LIKE '%failed 3 times%'") == 1

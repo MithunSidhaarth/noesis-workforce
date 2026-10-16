@@ -46,7 +46,7 @@ export default function Applications() {
               </div>
             )) : <p className="text-zinc-500">None yet.</p>}
             {!!sel.missing?.length && <p className="text-amber-700">Needs from you: {sel.missing.join(", ")}</p>}
-            {sel.state === "READY_TO_SUBMIT" && (
+            {(sel.state === "READY_TO_SUBMIT" || (sel.state === "REVIEW" && sel.submission_method === "web_form")) && (
               <div className="space-y-2 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-950">
                 {sel.submission_method === "web_form" ? (
                   <>
@@ -64,6 +64,17 @@ export default function Applications() {
               </div>
             )}
             {sel.evidence && <p className="text-xs">Evidence: {sel.evidence}</p>}
+            {["SUBMITTED", "FOLLOW_UP"].includes(sel.state) && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span>How did it go?</span>
+                {["accepted", "rejected", "no_response"].map((o) => (
+                  <Button key={o} variant={o === "accepted" ? "primary" : "default"}
+                    onClick={async () => { await post(`/applications/${sel.id}/outcome`, { outcome: o }); setSel(null); reload(); }}>
+                    {o.replace("_", " ")}</Button>
+                ))}
+              </div>
+            )}
+            {sel.outcome && <p>Outcome: <Badge>{sel.outcome}</Badge></p>}
           </div>
         )}
       </Drawer>

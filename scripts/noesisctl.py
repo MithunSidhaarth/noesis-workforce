@@ -10,11 +10,18 @@
   dry-run on|off                 global dry-run switch
   enable BOT | disable BOT
   test-telegram                  send a real test message to TELEGRAM_OWNER_ID
+  doctor                         check configuration and health; prints what to fix
+  confirm REF [URL] | skip REF [REASON] | outcome REF accepted|rejected|no_response
+  profile-set KEY VALUE          add a verified fact (same as Telegram /profile set)
+  prune                          run the data-retention cleanup now
 """
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -78,10 +85,90 @@ def main(argv: list[str]) -> int:
             return 1
         print("bot:", tg.me().get("username"))
         print("sent message id:", tg.send_owner("NOESIS test message: Telegram is connected.").get("message_id"))
+    elif cmd == "doctor":
+        return doctor(db)
+    elif cmd in ("confirm", "skip", "outcome", "profile-set"):
+        from workforce import owner_actions as oa
+        try:
+            if cmd == "confirm":
+                print(oa.confirm_opportunity(db, args[0], by="cli", url=args[1] if len(args) > 1 else None)["opportunity"]["title"])
+            elif cmd == "skip":
+                print(oa.skip_opportunity(db, args[0], by="cli", reason=" ".join(args[1:]))["title"])
+            elif cmd == "outcome":
+                print(oa.record_outcome(db, args[0], args[1], by="cli")["outcome"])
+            else:
+                print(oa.set_profile_fact(db, args[0], " ".join(args[1:]), by="cli"))
+        except (oa.OwnerActionError, IndexError) as e:
+            print(f"error: {e or 'missing argument'}")
+            return 1
+    elif cmd == "prune":
+        from workforce.scheduler import prune
+        print(prune(db))
     else:
         print(__doc__)
         return 2
     return 0
+
+
+def doctor(db) -> int:
+    """Read-only checks. Exit code 1 if anything is broken (not just a warning)."""
+    from workforce.core.settings import get_settings
+    from workforce.sources.registry import load_profile, profile_problems
+    s = get_settings()
+    bad, warn, ok = [], [], []
+
+    def check(cond: bool, good: str, problem: str, fatal: bool = True):
+        (ok if cond else (bad if fatal else warn)).append(good if cond else problem)
+
+    check(len(os.environ.get("NOESIS_SESSION_SECRET", "")) >= 32, "session secret set",
+          "NOESIS_SESSION_SECRET missing or shorter than 32 chars")
+    check(os.environ.get("NOESIS_ADMIN_PASSWORD_HASH", "").startswith("pbkdf2_sha256"), "dashboard password hash set",
+          "NOESIS_ADMIN_PASSWORD_HASH missing: run scripts/hash_password.py")
+    if s.telegram_token:
+        check(s.telegram_owner_id.isdigit(), "Telegram owner id is numeric",
+              "TELEGRAM_OWNER_ID must be your numeric Telegram user id (ask @userinfobot)")
+    else:
+        warn.append("Telegram not configured: you will get no alerts or morning brief")
+    migrated = {r["name"] for r in db.all("SELECT name FROM schema_migrations")}
+    files = {f.name for f in (Path(__file__).resolve().parents[1] / "database" / "migrations").glob("*.sql")}
+    check(files <= migrated, f"database migrated ({len(migrated)} migrations)", f"migrations not applied: {sorted(files - migrated)}")
+    if s.vault_path:
+        p = Path(s.vault_path)
+        check(p.is_dir() and os.access(p, os.W_OK), f"vault writable at {p}", f"vault path {p} missing or not writable", fatal=False)
+    else:
+        warn.append("NOESIS_VAULT_PATH not set: notes are staged in data/vault-staging")
+    providers = [k for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY") if os.environ.get(k)]
+    check(bool(providers) or os.environ.get("OLLAMA_ENABLED") == "true", f"model providers: {', '.join(providers) or 'ollama'}",
+          "no model provider configured: bots run deterministic-only (fine, but no drafting)", fatal=False)
+    for p in profile_problems(load_profile()):
+        warn.append(f"profile: {p}")
+    st = SystemState(db)
+    if st.dry_run:
+        warn.append("dry-run is ON: nothing goes out for real (turn off in Settings when ready)")
+    if st.paused:
+        warn.append("emergency pause is ON")
+    stale = db.all("SELECT id FROM bots WHERE enabled=1 AND (last_heartbeat IS NULL OR last_heartbeat < ?)", (time.time() - 300,))
+    check(not stale, "all enabled bots heartbeating", f"bots not heartbeating: {', '.join(b['id'] for b in stale)}")
+    hb = db.scalar("SELECT value FROM system_state WHERE key='scheduler_heartbeat'")
+    check(bool(hb) and time.time() - float(hb) < 120, "scheduler alive", "scheduler heartbeat missing or stale")
+    for i in db.all("SELECT name, status, detail FROM integrations WHERE status IN ('revoked','error')"):
+        bad.append(f"integration {i['name']} is {i['status']}: {i['detail']}")
+    unknown = db.scalar("SELECT COUNT(*) FROM external_actions WHERE status='unknown'")
+    check(not unknown, "no actions with unknown outcome", f"{unknown} interrupted action(s) need checking (dashboard Logs)")
+    free = shutil.disk_usage(s.data_dir if Path(s.data_dir).exists() else ".").free / 1e9
+    check(free > 2, f"disk free {free:.1f} GB", f"low disk: {free:.1f} GB free", fatal=free < 0.5)
+    backups = sorted(Path(s.data_dir, "backups").glob("*")) if Path(s.data_dir, "backups").exists() else []
+    check(bool(backups) and time.time() - backups[-1].stat().st_mtime < 2 * 86400, "recent backup present",
+          "no backup in the last 2 days (see DEPLOYMENT.md step 10)", fatal=False)
+    check(shutil.which("ffmpeg") is not None, "ffmpeg installed", "ffmpeg missing: reels cannot be rendered", fatal=False)
+    for x in ok:
+        print(f"  ok    {x}")
+    for x in warn:
+        print(f"  warn  {x}")
+    for x in bad:
+        print(f"  FIX   {x}")
+    print(f"\n{len(bad)} problem(s), {len(warn)} warning(s)")
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":

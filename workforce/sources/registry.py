@@ -55,4 +55,36 @@ def load_profile(config_dir: str | None = None) -> dict:
     p = d / "profile.yaml"
     if not p.exists():
         p = d / "profile.example.yaml"
-    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    profile = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    return merge_owner_facts(profile)
+
+
+def merge_owner_facts(profile: dict, db: Database | None = None) -> dict:
+    """Facts the owner typed (Telegram /profile set, dashboard) override the YAML.
+    They count as verified because the owner stated them directly."""
+    try:
+        rows = (db or get_db()).all("SELECT key, value, section, sensitive FROM profile_facts")
+    except Exception:  # noqa: BLE001  (table not migrated yet, or no DB in this process)
+        return profile
+    for r in rows:
+        sec = profile.get(r["section"]) or {}
+        sec[r["key"]] = {"value": r["value"], "verified": True, "sensitive": bool(r["sensitive"]), "source": "owner"}
+        profile[r["section"]] = sec
+    return profile
+
+
+def profile_problems(profile: dict) -> list[str]:
+    """Startup check: things that will silently stall applications if left empty."""
+    out = []
+    facts = {k: v for k, v in (profile.get("facts") or {}).items() if isinstance(v, dict) and v.get("verified")}
+    answers = {k: v for k, v in (profile.get("answers") or {}).items() if isinstance(v, dict) and v.get("verified")}
+    if not facts:
+        out.append("no verified facts yet: applications cannot check eligibility")
+    for k in ("degree", "citizenship", "graduation_year"):
+        if facts and k not in facts:
+            out.append(f"missing fact: {k}")
+    if "short_bio" not in answers:
+        out.append("missing answer: short_bio")
+    if not profile.get("interests"):
+        out.append("no interests listed: every opportunity will score low")
+    return out

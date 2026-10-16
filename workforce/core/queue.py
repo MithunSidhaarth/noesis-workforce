@@ -121,6 +121,8 @@ class TaskQueue:
                  spec.run_after or t, spec.deadline, t, t,
                  "dependency failed" if status == "cancelled" else None),
             )
+            for d in deps:
+                c.execute("INSERT OR IGNORE INTO task_deps(task_id, depends_on) VALUES (?,?)", (tid, d))
         if status == "queued":
             wake(spec.bot_id)
         audit(self.db, spec.requested_by, "task.enqueued", spec.correlation_id or tid,
@@ -130,6 +132,10 @@ class TaskQueue:
     # ---- claim -------------------------------------------------------------
     def claim(self, bot_id: str, worker_id: str, limit: int = 1) -> list[Task]:
         t = now()
+        # cheap read first: an idle bot does not take the write lock
+        if not self.db.scalar("SELECT 1 FROM tasks WHERE bot_id=? AND status IN ('queued','failed','deferred') "
+                              "AND run_after<=? LIMIT 1", (bot_id, t)):
+            return []
         with self.db.tx() as c:
             bot = c.execute("SELECT enabled, state FROM bots WHERE id=?", (bot_id,)).fetchone()
             if not bot or not bot["enabled"] or bot["state"] == "paused":
@@ -160,8 +166,11 @@ class TaskQueue:
         )
         return cur.rowcount == 1
 
-    def checkpoint(self, task_id: str, data: dict) -> None:
-        self.db.execute("UPDATE tasks SET checkpoint_json=?, updated_at=? WHERE id=?", (dumps(data), now(), task_id))
+    def checkpoint(self, task_id: str, data: dict, worker_id: str | None = None) -> None:
+        q, args = "UPDATE tasks SET checkpoint_json=?, updated_at=? WHERE id=?", (dumps(data), now(), task_id)
+        if worker_id:
+            q, args = q + " AND lease_owner=?", args + (worker_id,)
+        self.db.execute(q, args)
 
     # ---- completion ----------------------------------------------------------
     def complete(self, task_id: str, result: Any = None, worker_id: str | None = None) -> bool:
@@ -205,17 +214,22 @@ class TaskQueue:
                  bot_id=r["bot_id"], task_id=task_id, correlation_id=r["correlation_id"])
         return status
 
-    def defer(self, task_id: str, reason: str, delay_s: float) -> None:
-        """Re-queue without consuming an attempt (budget exhausted, global pause)."""
+    def defer(self, task_id: str, reason: str, delay_s: float, worker_id: str | None = None) -> bool:
+        """Re-queue without consuming an attempt (budget exhausted, global pause, daily cap)."""
         t = now()
-        self.db.execute(
-            "UPDATE tasks SET status='deferred', attempts=MAX(0, attempts-1), error=?, run_after=?, lease_owner=NULL, updated_at=? "
-            "WHERE id=? AND status='running'", (reason, t + delay_s, t, task_id))
+        q = ("UPDATE tasks SET status='deferred', attempts=MAX(0, attempts-1), error=?, run_after=?, lease_owner=NULL, "
+             "updated_at=? WHERE id=? AND status='running'")
+        args: tuple = (reason, t + delay_s, t, task_id)
+        if worker_id:
+            q, args = q + " AND lease_owner=?", args + (worker_id,)
+        return self.db.execute(q, args).rowcount == 1
 
-    def wait_for_approval(self, task_id: str, approval_id: str) -> None:
-        self.db.execute(
-            "UPDATE tasks SET status='waiting_approval', error=?, lease_owner=NULL, updated_at=? WHERE id=? AND status='running'",
-            (f"waiting for approval {approval_id}", now(), task_id))
+    def wait_for_approval(self, task_id: str, approval_id: str, worker_id: str | None = None) -> bool:
+        q = "UPDATE tasks SET status='waiting_approval', error=?, lease_owner=NULL, updated_at=? WHERE id=? AND status='running'"
+        args: tuple = (f"waiting for approval {approval_id}", now(), task_id)
+        if worker_id:
+            q, args = q + " AND lease_owner=?", args + (worker_id,)
+        return self.db.execute(q, args).rowcount == 1
 
     def resume_after_approval(self, task_id: str) -> None:
         self.db.execute(
@@ -252,10 +266,15 @@ class TaskQueue:
             self.fail(r["id"], f"lease expired (worker {r['lease_owner']} crashed or timed out)", retryable=True)
         return len(rows)
 
+    def release_worker(self, worker_id: str, reason: str) -> int:
+        """Hand back every task this worker still holds (restart or shutdown), without spending an attempt."""
+        rows = self.db.all("SELECT id FROM tasks WHERE status='running' AND lease_owner=?", (worker_id,))
+        return sum(1 for r in rows if self.defer(r["id"], reason, 0, worker_id))
+
     # ---- dependency helpers ------------------------------------------------
     def _release_dependents(self, c, task_id: str) -> None:
-        rows = c.execute("SELECT id, depends_on_json FROM tasks WHERE status='pending' AND depends_on_json LIKE ?",
-                         (f'%"{task_id}"%',)).fetchall()
+        rows = c.execute("SELECT t.id, t.depends_on_json FROM task_deps d JOIN tasks t ON t.id=d.task_id "
+                         "WHERE d.depends_on=? AND t.status='pending'", (task_id,)).fetchall()
         for r in rows:
             deps = loads(r["depends_on_json"], [])
             sts = c.execute(f"SELECT status FROM tasks WHERE id IN ({','.join('?' * len(deps))})", deps).fetchall()
@@ -263,7 +282,8 @@ class TaskQueue:
                 c.execute("UPDATE tasks SET status='queued', run_after=?, updated_at=? WHERE id=?", (now(), now(), r["id"]))
 
     def _cancel_dependents(self, c, task_id: str, reason: str) -> None:
-        rows = c.execute("SELECT id FROM tasks WHERE status='pending' AND depends_on_json LIKE ?", (f'%"{task_id}"%',)).fetchall()
+        rows = c.execute("SELECT t.id FROM task_deps d JOIN tasks t ON t.id=d.task_id "
+                         "WHERE d.depends_on=? AND t.status='pending'", (task_id,)).fetchall()
         for r in rows:
             c.execute("UPDATE tasks SET status='cancelled', error=?, finished_at=?, updated_at=? WHERE id=?",
                       (reason, now(), now(), r["id"]))

@@ -120,13 +120,15 @@ class MessageBus:
     # ---- receiving -------------------------------------------------------
     def claim(self, bot_id: str, worker_id: str, limit: int = 5, lease_s: float = 120) -> list[dict]:
         t = now()
+        # cheap read first: an idle inbox does not take the write lock (expiry runs in housekeeping)
+        if not self.db.scalar("SELECT 1 FROM messages WHERE recipient=? AND status='pending' AND run_after<=? LIMIT 1",
+                              (bot_id, t)):
+            return []
         with self.db.tx() as c:
-            # expire stale messages first
-            c.execute("UPDATE messages SET status='expired' WHERE recipient=? AND status='pending' AND expires_at IS NOT NULL AND expires_at < ?",
-                      (bot_id, t))
             rows = c.execute(
-                "SELECT * FROM messages WHERE recipient=? AND status='pending' AND run_after<=? ORDER BY priority, created_at LIMIT ?",
-                (bot_id, t, limit)).fetchall()
+                "SELECT * FROM messages WHERE recipient=? AND status='pending' AND run_after<=? "
+                "AND (expires_at IS NULL OR expires_at>=?) ORDER BY priority, created_at LIMIT ?",
+                (bot_id, t, t, limit)).fetchall()
             out = []
             for r in rows:
                 c.execute("UPDATE messages SET status='delivered', attempts=attempts+1, lease_owner=?, lease_expires=?, delivered_at=? WHERE id=?",
@@ -154,6 +156,10 @@ class MessageBus:
                         ("dead" if retryable else "rejected", error[:1000], message_id))
         exec_log(self.db, "error", f"message dead-lettered: {error[:200]}", bot_id=r["recipient"], correlation_id=r["correlation_id"])
         return "dead"
+
+    def expire_stale(self) -> int:
+        return self.db.execute("UPDATE messages SET status='expired' WHERE status='pending' AND expires_at IS NOT NULL "
+                               "AND expires_at < ?", (now(),)).rowcount
 
     def reclaim_expired(self) -> int:
         t = now()

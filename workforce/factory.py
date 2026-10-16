@@ -4,7 +4,6 @@ Integrations that are not configured are simply absent; agents degrade to
 draft/notify-less behaviour and the integrations table records why."""
 from __future__ import annotations
 
-import os
 
 from .core.db import Database, get_db
 from .core.settings import get_settings

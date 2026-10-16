@@ -10,7 +10,7 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from ..core.db import dumps, loads
+from ..core.db import dumps
 from ..core.queue import Task
 from ..core.settings import get_settings
 from ..core.state import set_integration_status
@@ -97,7 +97,7 @@ class CommunicationsAgent(Agent):
             if prio == "high":
                 important.append(f"• [{cat}] {m['subject'][:80]} — {m['from'][:60]}")
         if important:
-            ctx.notify_owner("📬 Important email:\n" + "\n".join(important[:10]), key=f"mail:{','.join(sorted(important))[:200]}")
+            ctx.notify_owner("📬 Important email:\n" + "\n".join(important[:10]), key=f"mail:{','.join(sorted(important))[:200]}", urgent=True)
         return {"fetched": len(msgs), "important": len(important)}
 
     def suggest_meeting_slots(self, ctx: AgentContext, task: Task) -> dict:
@@ -163,7 +163,9 @@ class CommunicationsAgent(Agent):
 
         res = ctx.act("email.send", f"send:{e['id']}", executor, target=to.group(0), params={"subject": "Re: " + e["subject"]},
                       attributes={"category": e["category"]}, summary=f"Send reply: {e['subject'][:60]}")
+        # honest states: only a real send is TRACKED; a dry run can be sent for real later
+        state = {"succeeded": "TRACKED", "duplicate": "TRACKED", "dry_run": "DRY_RUN", "blocked": "BLOCKED"}.get(
+            res.status, "APPROVAL_REQUIRED")
         ctx.db.execute("UPDATE emails SET state=?, follow_up_at=?, updated_at=? WHERE id=?",
-                       ("TRACKED" if res.status in ("succeeded", "dry_run") else "SENT_OR_APPROVAL_REQUIRED",
-                        now() + 5 * 86400, now(), e["id"]))
+                       (state, now() + 5 * 86400 if state == "TRACKED" else None, now(), e["id"]))
         return {"email_id": e["id"], "action": res.status, "evidence": res.evidence}

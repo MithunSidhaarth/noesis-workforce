@@ -51,9 +51,15 @@ def subscribe(callback) -> threading.Thread | None:
 
     def loop():
         import time
+
+        import redis
+        # a subscriber sits idle for long stretches: no read timeout, or it drops every
+        # few seconds and wake-ups are lost (publishing keeps the short timeout)
+        sub = redis.Redis.from_url(get_settings().redis_url, socket_timeout=None, socket_connect_timeout=5,
+                                   health_check_interval=30)
         while True:
             try:
-                ps = r.pubsub(ignore_subscribe_messages=True)
+                ps = sub.pubsub(ignore_subscribe_messages=True)
                 ps.subscribe(CHANNEL)
                 for m in ps.listen():
                     callback(m["data"].decode() if isinstance(m["data"], bytes) else str(m["data"]))

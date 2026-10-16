@@ -124,7 +124,7 @@ class KnowledgeAgent(Agent):
               "concepts": analysis["concepts"], "summarized_by": analysis["method"]}
         body = "\n".join([
             f"# {fm['title']}", "", f"**Source:** [{url}]({url})  ", f"**Creator:** {fm['creator'] or 'unknown'}  ",
-            f"**Captured:** {fm['captured_at']}  ", f"**Status:** `processed` / review: `unreviewed`", "",
+            f"**Captured:** {fm['captured_at']}  ", "**Status:** `processed` / review: `unreviewed`", "",
             "## TL;DR", "", analysis["tldr"], "", "## Key Concepts", "",
             *[f"- [[{c}]]" for c in analysis["concepts"]], "", "## Key Points", "",
             *[f"- {p}" for p in analysis["key_points"]], "", "## Claims To Verify", "",
