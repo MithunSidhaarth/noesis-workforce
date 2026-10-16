@@ -4,6 +4,7 @@ Integrations that are not configured are simply absent; agents degrade to
 draft/notify-less behaviour and the integrations table records why."""
 from __future__ import annotations
 
+import os
 
 from .core.db import Database, get_db
 from .core.settings import get_settings
@@ -53,6 +54,9 @@ def build_services(db: Database | None = None) -> Services:
     if auth.configured():
         extra["mailbox"] = GmailClient(auth)
         extra["calendar"] = CalendarClient(auth)
+        from integrations.applications.email_submit import make_email_submitter
+        from workforce.sources.registry import load_profile
+        extra["application_submitters"] = {"email": make_email_submitter(extra["mailbox"], load_profile, s.data_dir)}
         _configured(db, "gmail", "credentials set; not yet verified by a live call")
     else:
         set_integration_status(db, "gmail", "not_configured", "Google OAuth not set up")
@@ -65,6 +69,18 @@ def build_services(db: Database | None = None) -> Services:
             _configured(db, name, "credentials set; publishing disabled by policy until you enable it")
         else:
             set_integration_status(db, name, "not_configured", "")
+    from integrations.social.publishers import PostizPublisher
+    from workforce.brands import load_brands
+    postiz = 0
+    for b in load_brands():
+        for platform, ch in b["channels"].items():
+            if ch.get("postiz_integration"):
+                extra["publishers"][f"{platform}:{b['id']}"] = PostizPublisher(str(ch["postiz_integration"]), platform)
+                postiz += 1
+    if postiz and os.environ.get("POSTIZ_API_KEY"):
+        _configured(db, "postiz", f"{postiz} channel(s) in config/brands.yaml; not yet verified by a live call")
+    elif postiz:
+        set_integration_status(db, "postiz", "not_configured", "POSTIZ_API_KEY missing in .env")
 
     pol = Policies()
     extra["policies_outreach"] = pol.get("outreach")

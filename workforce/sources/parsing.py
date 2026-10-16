@@ -243,6 +243,15 @@ def parse_json(content: bytes, base_url: str, cfg: dict) -> list[dict]:
     return out
 
 
+def keep_item(item: dict, cfg: dict) -> bool:
+    """Source-level relevance filter: `parser: {include_any: [india, bengaluru]}` keeps only matching items."""
+    words = [w.lower() for w in cfg.get("include_any") or []]
+    if not words:
+        return True
+    text = f"{item.get('title', '')} {item.get('body', '')} {' '.join(item.get('tags') or [])}".lower()
+    return any(w in text for w in words)
+
+
 def normalize_item(item: dict, source: dict, default_tz: str) -> dict | None:
     title = item.get("title") or ""
     if len(title) < 4:

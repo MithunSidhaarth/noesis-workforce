@@ -30,6 +30,14 @@ def guidelines() -> tuple[str, str]:
     return txt, sha(txt)[:10]
 
 
+PLATFORM_STYLE = {
+    "instagram": ("Instagram reel. First line is a scroll-stopping hook (under 10 words). Caption under 120 words, "
+                  "short lines, one clear takeaway, end with 3-5 specific hashtags. Scenes: punchy on-screen text, 3-6 scenes, under 45s."),
+    "linkedin": ("LinkedIn post, first person. Hook line, then a short story of what I built or learned, the problem, what worked, "
+                 "one lesson others can use. 120-250 words, short paragraphs, at most 3 hashtags, no emoji spam, no engagement bait."),
+}
+
+
 def set_state(ctx: AgentContext, cid: str, state: str, note: str = "", **fields) -> None:
     row = ctx.db.one("SELECT history_json, state FROM content_items WHERE id=?", (cid,))
     hist = loads(row["history_json"], []) + [{"ts": now(), "from": row["state"], "to": state, "note": note, "by": ctx.bot.id}]
@@ -43,7 +51,36 @@ class ContentStrategist(Agent):
     accepts = {"create_brief"}
 
     def handlers(self):
-        return {"create_brief": self.create_brief, "plan_week": self.plan_week}
+        return {"create_brief": self.create_brief, "plan_week": self.plan_week, "log_work": self.log_work}
+
+    def _fan_out(self, ctx: AgentContext, topic: str, sources: list, category: str, key: str, brand_id: str | None = None) -> list[str]:
+        """One brief per brand per platform it posts on; without brands, one LinkedIn brief as before."""
+        from ..brands import brands_for, load_brands
+        brands = load_brands()
+        if brand_id:
+            brands = [b for b in brands if b["id"] == brand_id]
+            if not brands:
+                raise PermanentError(f"unknown brand {brand_id!r} (config/brands.yaml)")
+        else:
+            brands = brands_for(f"{topic} {' '.join(str(x.get('summary') or '') for x in sources)}", brands)
+        targets = [(b["id"], pl) for b in brands for pl in (b["channels"] or {"linkedin": {}})] or [(None, "linkedin")]
+        created = []
+        for bid, pl in targets:
+            tid, new = ctx.enqueue_self("create_brief", {"topic": topic, "platform": pl, "brand": bid, "category": category,
+                                                         "sources": sources}, idempotency_key=f"{key}:{bid}:{pl}")
+            if new:
+                created.append(tid)
+        return created
+
+    def log_work(self, ctx: AgentContext, task: Task) -> dict:
+        """You tell it what you worked on (/work); it becomes posts for each brand and platform."""
+        text = str(task.payload.get("text") or "").strip()[:2000]
+        if len(text) < 10:
+            raise PermanentError("tell me a bit more about the work (at least a sentence)")
+        topic = text.split("\n")[0][:120]
+        created = self._fan_out(ctx, topic, [{"title": "Work log (from you)", "summary": text, "owner_provided": True}],
+                                task.payload.get("category") or "project_update", f"work:{sha(text)[:16]}", task.payload.get("brand"))
+        return {"briefs": len(created)}
 
     def plan_week(self, ctx: AgentContext, task: Task) -> dict:
         """Ideas from what you actually learned and did this week (no invented topics)."""
@@ -52,11 +89,8 @@ class ContentStrategist(Agent):
                               "ORDER BY created_at DESC LIMIT 3", (week,))
         created = []
         for c in captures:
-            tid, new = ctx.enqueue_self("create_brief", {"topic": c["title"], "platform": "linkedin", "category": "technical_learning",
-                                                         "sources": [{"url": c["url"], "title": c["title"], "summary": c["summary"]}]},
-                                        idempotency_key=f"idea:{c['id']}")
-            if new:
-                created.append(tid)
+            created += self._fan_out(ctx, c["title"], [{"url": c["url"], "title": c["title"], "summary": c["summary"]}],
+                                     "technical_learning", f"idea:{c['id']}")
         return {"ideas": len(created), "from_captures": len(captures)}
 
     def create_brief(self, ctx: AgentContext, task: Task) -> dict:
@@ -69,17 +103,20 @@ class ContentStrategist(Agent):
         for dep in ctx.queue.dependency_results(task).values():
             for r in (dep.get("result") or {}).get("results", []):
                 sources.append({"title": r["title"], "path": r["path"], "url": r.get("source_url")})
+        from ..brands import get_brand, voice_text
+        brand = get_brand(p.get("brand"))
         g, gv = guidelines()
         cid = new_id("cnt")
-        brief = {"topic": topic, "platform": platform, "audience": p.get("audience", "students and early-career engineers"),
+        brief = {"topic": topic, "platform": platform, "brand": brand["id"] if brand else None, "voice": voice_text(brand),
+                 "audience": p.get("audience") or (brand or {}).get("audience") or "students and early-career engineers",
                  "angle": p.get("angle") or f"What I learned about {topic}", "sources": sources[:6],
                  "format": "reel" if platform == "instagram" else "post", "guidelines_version": gv,
                  "cta": p.get("cta", "Ask a question or share what you'd add."),
                  "notes": [] if g else ["No creative guidelines imported yet (prompts/content/guidelines.md); drafts will be plain."]}
-        ctx.db.execute("INSERT INTO content_items(id, title, platform, format, category, state, brief_json, sources_json, created_at, updated_at) "
-                       "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ctx.db.execute("INSERT INTO content_items(id, title, platform, format, category, state, brief_json, sources_json, brand, "
+                       "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                        (cid, topic, platform, brief["format"], p.get("category", "technical_learning"), "IDEA", dumps(brief),
-                        dumps(sources[:6]), now(), now()))
+                        dumps(sources[:6]), brief["brand"], now(), now()))
         set_state(ctx, cid, "RESEARCH", f"{len(sources)} source(s)")
         set_state(ctx, cid, "BRIEF", "brief written")
         ctx.delegate("content_studio", "draft_content", {"content_id": cid}, dedupe_key=f"draft:{cid}")
@@ -106,7 +143,9 @@ class ContentStudio(Agent):
         if ctx.has_model("write"):
             src_txt = "\n".join(f"[{i}] {s.get('title')}: {s.get('summary') or ''} ({s.get('url') or s.get('path')})" for i, s in enumerate(sources))
             prompt = (f"Write a {brief['platform']} {brief['format']} about: {brief['topic']}\nAngle: {brief['angle']}\n"
-                      f"Audience: {brief['audience']}\nCTA: {brief['cta']}\n"
+                      f"Audience: {brief['audience']}\nCTA: {brief['cta']}\nFORMAT: {PLATFORM_STYLE.get(brief['platform'], '')}\n"
+                      + (f"WHOSE ACCOUNT (write in this voice):\n{brief['voice']}\n" if brief.get("voice") else "")
+                      + "Use only what the sources say about my work; never invent results, numbers or names. "
                       "Every factual claim must cite a source index. Reply JSON: {\"body\": str, \"claims\": [{\"text\": str, \"source\": int|null}], "
                       "\"scenes\": [{\"text\": str, \"narration\": str, \"duration\": number}]} (scenes only for reels, 3-6 scenes, total < 60s).\n"
                       f"GUIDELINES:\n{g or '(none provided: keep it plain, first person, no hype)'}\nSOURCES:\n" + untrusted(src_txt, 6000))
@@ -120,8 +159,12 @@ class ContentStudio(Agent):
                 ctx.log(f"model draft failed, using template: {e}", level="warning")
         if method == "template":
             pts = [s.get("summary") or s.get("title") for s in sources if s.get("summary") or s.get("title")][:3]
-            body = (f"{brief['angle']}.\n\n" + "\n".join(f"• {p[:220]}" for p in pts) + f"\n\n{brief['cta']}"
-                    + ("\n\nSources: " + ", ".join(s.get("url") or s.get("title") for s in sources[:3]) if sources else ""))
+            links = [s["url"] for s in sources[:3] if s.get("url")]
+            if brief["platform"] == "instagram":
+                body = f"{brief['angle']}\n\n" + "\n".join(f"→ {p[:120]}" for p in pts) + f"\n\n{brief['cta']}"
+            else:
+                body = (f"{brief['angle']}.\n\n" + "\n".join(f"• {p[:220]}" for p in pts) + f"\n\n{brief['cta']}"
+                        + ("\n\nSources: " + ", ".join(links) if links else ""))
             scenes = [{"text": brief["angle"], "narration": brief["angle"], "duration": 3}] + \
                      [{"text": p[:90], "narration": p[:160], "duration": 4} for p in pts] + \
                      [{"text": brief["cta"][:90], "narration": brief["cta"], "duration": 3}]
@@ -184,7 +227,7 @@ class ContentStudio(Agent):
         qc = loads(item["brief_json"], {}).get("qc", {})
         assets = loads(item["assets_json"], [])
         publishers = ctx.services.get("publishers", {})
-        pub = publishers.get(item["platform"])
+        pub = (publishers.get(f"{item['platform']}:{item['brand']}") if item["brand"] else None) or publishers.get(item["platform"])
         account = getattr(pub, "account_id", None) or f"{item['platform']}:default"
         attrs = {"category": item["category"], "media_valid": all(a.get("validated", True) for a in assets),
                  "not_duplicate": True, "licenses_ok": qc.get("licenses_ok", False), "has_claims": bool(loads(item["claims_json"], [])),
@@ -198,7 +241,13 @@ class ContentStudio(Agent):
                 e.integration = item["platform"]
                 raise e
             if item["format"] == "reel":
-                raise PermanentError("reel publishing needs a public video URL host; not configured")
+                video = next((a["path"] for a in assets if a.get("kind") == "video" and a.get("path")), None)
+                wait = max(30.0, (ctx.time_left() or 600) - 60)
+                if video and hasattr(pub, "publish_reel_file"):
+                    return pub.publish_reel_file(video, item["body"] or item["title"], wait_s=wait)
+                if video and hasattr(pub, "publish_video_file"):
+                    return pub.publish_video_file(video, item["body"] or item["title"], title=item["title"], wait_s=wait)
+                raise PermanentError(f"no rendered video to publish, or {item['platform']} does not take video")
             return pub.publish_text(item["body"])
 
         res = ctx.act("social.publish", f"publish:{item['id']}", executor, target=account,

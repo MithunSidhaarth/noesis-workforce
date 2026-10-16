@@ -1,7 +1,7 @@
 # Automatic publishing policy (Content Studio). Starts DISABLED.
 version: 1
 enabled: false
-accounts_allowlist: []            # e.g. ["linkedin:urn:li:person:XXXX", "instagram:1784..."]
+accounts_allowlist: []            # e.g. ["postiz:<channel id>", "linkedin:urn:li:person:XXXX", "instagram:1784..."]
 auto_categories:                  # categories that may auto-publish when every check passes
   - educational
   - project_update
@@ -15,6 +15,7 @@ approval_categories:              # always need you
   - sensitive_claim
 max_posts_per_day: 1
 max_posts_per_week: 4
+caps_per_account: true            # the caps above apply to each account separately (cue.notch IG, cue.notch LinkedIn, ...)
 require_media_validation: true
 require_duplicate_check: true
 require_license_check: true

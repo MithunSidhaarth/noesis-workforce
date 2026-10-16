@@ -76,3 +76,29 @@ service from the build environment, whose network blocks them.
     outreach sending and calendar writes stay off until you flip them in
     `policies/email.yaml` and `policies/outreach.yaml`, and each send still
     needs your approval unless you add an explicit auto rule.
+
+
+## Postiz (multi-account posting)
+
+`PostizPublisher` (integrations/social/publishers.py): `GET /integrations` to
+find the channel and its provider type, `POST /upload` for the reel, then
+`POST /posts` with `type: now`. Auth is the raw API key in `Authorization`.
+One publisher per channel in `config/brands.yaml`; the policy allowlist entry is
+`postiz:<channel id>`. Evidence is Postiz's post id: Postiz publishes
+asynchronously, so a platform-side failure shows in Postiz. Tested with
+`httpx.MockTransport` only.
+
+## Email applications
+
+`integrations/applications/email_submit.py`: subject and body from verified
+answers only, documents from `data/documents/` (path must stay inside the data
+folder, max 10 MB), sent with the Gmail client. Only runs when
+`policies/applications.yaml` allows it (rule *approved-by-me*: you confirmed
+the opportunity, everything verified, max 5 a day) and dry-run is off.
+
+## Idea scout
+
+`integrations/trends/signals.py`: GitHub REST search (`created:>date`, by
+stars), Hugging Face `api/models|spaces?sort=trendingScore`, HN Algolia Show HN,
+arXiv API. Official APIs, no scraping. `GITHUB_TOKEN` is optional. Tested with
+fakes only; first live check is the first morning run on your PC.

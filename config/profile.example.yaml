@@ -26,6 +26,10 @@ documents: {}
 
 # Relevance scoring (not used as application facts).
 interests: [ai, machine learning, agents, llm, software engineering, hackathon, startup, research, open source]
+idea_scout:                       # daily trending project ideas (GitHub, Hugging Face, Show HN, arXiv)
+  days: 3                         # look-back window; the scout runs every morning
+  github_topics: [llm, agents, rag]
+  arxiv_categories: [cs.AI, cs.CL, cs.LG]
 preferred_types: [hackathon, fellowship, internship, grant, competition, scholarship, conference]
 preferred_locations: [india, bengaluru, bangalore, remote, online, global]
 exclude_keywords: [phd only, postdoc, senior, 10+ years]

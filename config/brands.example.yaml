@@ -1,0 +1,30 @@
+# Your accounts. Copy to config/brands.yaml and fill in.
+# Each piece of work you log (/work on Telegram) becomes one post per brand per
+# platform: Instagram gets a reel with a hook, short caption and a few hashtags;
+# LinkedIn gets a longer first-person story post.
+#
+# Channel ids come from Postiz (postiz.com or self-hosted): connect each account
+# there, then copy its id (Postiz → channel → Preferences, or GET /public/v1/integrations).
+# Put POSTIZ_API_KEY in .env, never here. Then add "postiz:<id>" for each channel
+# to accounts_allowlist in policies/publishing.yaml and set enabled: true.
+brands:
+  - id: cuenotch
+    name: cue.notch
+    handle: "@cue.notch"
+    about: ""          # one line: what the brand is about
+    audience: ""       # who it is for
+    voice: ""          # e.g. "technical build-log, calm, no hype"
+    topics: []         # optional keywords; work mentioning them goes to this brand (empty = every piece of work)
+    channels:
+      instagram: {postiz_integration: ""}
+      linkedin: {postiz_integration: ""}
+  - id: msthinks
+    name: msthinks
+    handle: "@msthinks"
+    about: ""
+    audience: ""
+    voice: ""
+    topics: []
+    channels:
+      instagram: {postiz_integration: ""}
+      linkedin: {postiz_integration: ""}

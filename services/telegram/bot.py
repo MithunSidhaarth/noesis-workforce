@@ -17,9 +17,9 @@ from workforce.core.db import loads
 from workforce.core.state import SystemState, audit, configure_logging, exec_log, set_integration_status
 from workforce.core.util import now
 from workforce.owner_actions import (OwnerActionError, closes_in, confirm_opportunity, create_reminder, decide,
-                                     find_opportunity, local, missing_summary, opportunity_card, pending_approvals,
+                                     find_opportunity, local, log_work, missing_summary, opportunity_card, pending_approvals,
                                      plain_status, record_outcome, record_submission, remind_opportunity, set_profile_fact,
-                                     shortlist, skip_opportunity)
+                                     request_ideas, shortlist, skip_opportunity)
 from workforce.policies.engine import IntegrationError, IntegrationRevoked
 
 HELP = """NOESIS Workforce
@@ -37,6 +37,8 @@ Opportunities
 Everyday
 /inbox: approvals (numbered) · /approve <n> · /deny <n>
 /remind tomorrow 09:00 call the bank (also: in 2h …, fri 18:00 …, 2026-11-03 10:00 …)
+/work <what you did> · /work <brand> <what you did>: turn it into posts
+/ideas: this week's trending project ideas
 /status · /bots · /tasks · /content
 /pause: stop all external actions · /resume
 
@@ -240,8 +242,19 @@ class CommandHandler:
         return "\n".join(lines + ["", "Add or change: /profile set <key> <value>"])
 
     def cmd_content(self, _):
-        rows = self.db.all("SELECT title, platform, state FROM content_items ORDER BY updated_at DESC LIMIT 10")
-        return "\n".join(f"• [{r['platform']}] {r['title'][:60]}: {r['state']}" for r in rows) or "Content queue is empty."
+        rows = self.db.all("SELECT title, platform, brand, state FROM content_items ORDER BY updated_at DESC LIMIT 10")
+        return "\n".join(f"• [{r['brand'] + ' ' if r['brand'] else ''}{r['platform']}] {r['title'][:60]}: {r['state']}"
+                         for r in rows) or "Content queue is empty."
+
+    def cmd_work(self, arg):
+        r = log_work(self.db, arg, by="telegram:owner")
+        who = r["brand"] or "your accounts"
+        return f"📝 Logged. Drafting posts for {who}; they go through QC and the publishing rules (/content to follow)."
+
+    def cmd_ideas(self, _):
+        r = request_ideas(self.db, by="telegram:owner")
+        return "💡 Looking for trending project ideas now; the note lands in your vault (02 Knowledge/Project Ideas)." if r["queued"] \
+            else "💡 Already running; the note lands in your vault shortly."
 
     def cmd_pause(self, _):
         self.state.set(SystemState.PAUSED, True, by="telegram:owner")

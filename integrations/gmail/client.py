@@ -85,12 +85,19 @@ class GmailClient:
                         "list_unsubscribe": bool(h.get("list-unsubscribe")), "labels": d.get("labelIds", [])})
         return out
 
-    def _raw(self, to: str, subject: str, body: str, thread_id: str | None = None, in_reply_to: str | None = None) -> dict:
+    def _raw(self, to: str, subject: str, body: str, thread_id: str | None = None, in_reply_to: str | None = None,
+             attachments: list | None = None) -> dict:
+        import mimetypes
+        from pathlib import Path
         m = EmailMessage()
         m["To"], m["Subject"] = to, subject
         if in_reply_to:
             m["In-Reply-To"] = m["References"] = in_reply_to
         m.set_content(body)
+        for f in attachments or []:
+            f = Path(f)
+            ctype = (mimetypes.guess_type(f.name)[0] or "application/octet-stream").split("/", 1)
+            m.add_attachment(f.read_bytes(), maintype=ctype[0], subtype=ctype[1], filename=f.name)
         d = {"raw": base64.urlsafe_b64encode(m.as_bytes()).decode()}
         if thread_id:
             d["threadId"] = thread_id
@@ -100,8 +107,8 @@ class GmailClient:
         d = self.auth.request("POST", f"{self.BASE}/drafts", json={"message": self._raw(to, subject, body, thread_id)})
         return {"draft_id": d["id"], "evidence": f"gmail draft {d['id']}"}
 
-    def send(self, to: str, subject: str, body: str, thread_id: str | None = None) -> dict:
-        d = self.auth.request("POST", f"{self.BASE}/messages/send", json=self._raw(to, subject, body, thread_id))
+    def send(self, to: str, subject: str, body: str, thread_id: str | None = None, attachments: list | None = None) -> dict:
+        d = self.auth.request("POST", f"{self.BASE}/messages/send", json=self._raw(to, subject, body, thread_id, attachments=attachments))
         return {"message_id": d["id"], "evidence": f"gmail message {d['id']}"}
 
 

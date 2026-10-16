@@ -67,6 +67,7 @@ class OpportunityScout(Agent):
                     items = parsing.parse_html(content, base, parser_cfg)
                 elif kind == "json":
                     items = parsing.parse_json(content, base, parser_cfg)
+                items = [i for i in items if parsing.keep_item(i, parser_cfg)]
         except Exception as e:
             fails = src["consecutive_failures"] + 1
             ctx.db.execute("UPDATE sources SET last_checked=?, last_error=?, consecutive_failures=?, reliability=?, next_check=? WHERE id=?",

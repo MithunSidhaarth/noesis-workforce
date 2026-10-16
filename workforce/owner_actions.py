@@ -15,7 +15,7 @@ from .core.db import Database, dumps, loads
 from .core.queue import BotDisabled, TaskQueue
 from .core.settings import get_settings
 from .core.state import audit
-from .core.util import new_id, now
+from .core.util import new_id, now, sha
 
 OPEN_APP_STATES = ("PREPARATION", "REVIEW", "READY_TO_SUBMIT")
 OUTCOMES = ("accepted", "rejected", "no_response", "withdrawn")
@@ -413,3 +413,25 @@ def missing_summary(db: Database) -> list[tuple[str, int, str]]:
             how = "add the document under documents: in config/profile.yaml"
         out.append((item, n, how))
     return out
+
+
+def log_work(db: Database, text: str, by: str) -> dict:
+    """'/work [brand] <what you did>' -> posts for each brand and platform (Content Strategist)."""
+    from .brands import load_brands
+    text = (text or "").strip()
+    first, _, rest = text.partition(" ")
+    ids = {b["id"].lower(): b["id"] for b in load_brands()} | {b["name"].lower(): b["id"] for b in load_brands()}
+    brand = ids.get(first.lower().lstrip("@"))
+    if brand:
+        text = rest.strip()
+    if len(text) < 10:
+        raise OwnerActionError("Tell me what you worked on, e.g. /work shipped the voice agent demo: Whisper + Llama, 300ms latency")
+    TaskQueue(db).enqueue(TaskSpec(bot_id="content_strategist", kind="log_work", payload={"text": text[:2000], "brand": brand},
+                                   requested_by=by, idempotency_key=f"work:{sha(text)[:16]}:{brand}"))
+    return {"brand": brand}
+
+
+def request_ideas(db: Database, by: str) -> dict:
+    _, created = TaskQueue(db).enqueue(TaskSpec(bot_id="knowledge", kind="idea_scout", payload={}, requested_by=by,
+                                                idempotency_key=f"ideas:{int(now() // 3600)}"))
+    return {"queued": created}

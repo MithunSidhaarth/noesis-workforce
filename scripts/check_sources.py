@@ -40,9 +40,12 @@ def main() -> int:
                 items = parsing.parse_html(r.content, r.url, s.parser)
             else:
                 items = parsing.parse_json(r.content, r.url, s.parser)
+            total = len(items)
+            items = [i for i in items if parsing.keep_item(i, s.parser)]
             with_deadline = sum(1 for i in items if parsing.extract_deadline(f"{i.get('title', '')} {i.get('body', '')}", "Asia/Kolkata")[0])
             status = "OK " if items else "EMPTY"
-            print(f"{status} {s.id:28} {len(items):3} items, {with_deadline:3} with a labelled deadline   {s.url}")
+            kept = f" (of {total})" if total != len(items) else ""
+            print(f"{status} {s.id:28} {len(items):3} items{kept}, {with_deadline:3} with a labelled deadline   {s.url}")
             if not items:
                 bad += 1
         except Exception as e:  # noqa: BLE001

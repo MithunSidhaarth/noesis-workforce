@@ -173,10 +173,16 @@ class ApplicationsAgent(Agent):
         msg = (f"📝 Draft ready: {opp['title'][:90]}\n{closes_in(opp['deadline'])}\nEligibility: {elig}"
                + (f"\nNeeds from you: {', '.join(missing[:8])} (see /missing)" if missing else "\nNothing missing.")
                + ("\nYou submit it on the site, then send /submitted " + ref(app['id']) + " <confirmation>."
-                  if method == "web_form" else "\nSubmission: by email, after your approval.")
+                  if method == "web_form" else
+                  "\nYou approved this one, so I'm sending it by email now if every answer is verified; otherwise I'll ask."
+                  if opp["confirmed_by"] and not missing else "\nSubmission: by email, after your approval.")
                + f"\nRef {ref(app['id'])}")
         soon = bool(opp["deadline"]) and opp["deadline"] - now() < 72 * 3600
         ctx.notify_owner(msg, key=f"appprep:{app['id']}:{len(missing)}", urgent=soon)
+        if method in ("email", "api") and opp["confirmed_by"] and not missing:
+            # you already said yes to this opportunity: go straight to submission; the
+            # applications policy still checks every answer and the daily cap, and asks you otherwise
+            ctx.enqueue_self("submit_application", {"application_id": app["id"]}, idempotency_key=f"autosubmit:{app['id']}")
         return {"application_id": app["id"], "state": "REVIEW", "eligibility": status, "missing": missing,
                 "submission_method": method, "destination": dest}
 
@@ -235,7 +241,8 @@ class ApplicationsAgent(Agent):
                  "eligibility_status": opp["eligibility_status"], "missing_fields": missing,
                  "all_answers_from_verified_profile": all(a.get("status") == "verified" for a in loads(app["answers_json"], {}).values()),
                  "opportunity_type": opp["type"], "domain": domain(opp["official_url"]),
-                 "effort": opp["estimated_effort"] or "high", "requirements": task.payload.get("requirements", [])}
+                 "effort": opp["estimated_effort"] or "high", "requirements": task.payload.get("requirements", []),
+                 "owner_confirmed": bool(opp["confirmed_by"])}
 
         def executor(req):
             if integration is None:

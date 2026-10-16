@@ -5,7 +5,7 @@ Last updated: 2026-10-16. Branch `main`.
 ## Summary
 
 All ten bots, the runtime, dashboard, Telegram command centre, policies and
-deployment are implemented and pass 82 automated tests. The Docker stack builds
+deployment are implemented and pass 93 automated tests. The Docker stack builds
 and runs healthy. **No outside service has been called live yet**, so every
 integration is "implemented, tested with fakes, waiting for your first real run".
 
@@ -29,6 +29,18 @@ integration is "implemented, tested with fakes, waiting for your first real run"
   stuck-schedule alerts, data retention prune with WAL checkpoint.
 - Content: weekly plan, briefs, real FFmpeg reel render (on a host with FFmpeg),
   publication gated by policy.
+- Brands: `config/brands.yaml` (cue.notch → LinkedIn, msthinks → Instagram).
+  `/work <what you did>` and the Monday plan make one post per brand per
+  channel, in that brand's voice and the platform's format; publishing through
+  Postiz (any number of accounts) or the direct LinkedIn/Instagram APIs
+  (LinkedIn video upload, Instagram reel upload without a public media host);
+  post caps per account.
+- Daily project-idea scout (07:30): GitHub new repos, Hugging Face trending,
+  Show HN, arXiv → vault note `02 Knowledge/Project Ideas` and the morning
+  brief; `/ideas` on demand. Failed sources are listed in the note.
+- Applications: email submission through Gmail with verified answers and the
+  resume attached; an opportunity you confirmed is sent as soon as it is
+  complete (rule *approved-by-me*, max 5 a day). Web forms stay manual.
 - Communications: inbox triage, drafts; sending off by policy.
 - Knowledge: article capture into the vault, social links queued for your
   local NOESIS pipeline.
@@ -36,7 +48,7 @@ integration is "implemented, tested with fakes, waiting for your first real run"
 
 ## Implemented, not yet live-tested
 
-Telegram, Gmail, Google Calendar, LinkedIn, Instagram, the six opportunity
+Telegram, Gmail, Google Calendar, LinkedIn, Instagram, Postiz, the idea-scout APIs, the six opportunity
 sources, model providers (Gemini, Groq, Anthropic, Ollama), Syncthing vault
 sync, Caddy's Let's Encrypt certificate, Redis wake-ups. The build environment's
 network blocks all of them. See [INTEGRATIONS](INTEGRATIONS.md).

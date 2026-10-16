@@ -274,3 +274,79 @@ def test_bot_isolation_of_memory(env, services):
     b = BotRuntime("echo_b", services, "t")
     a.ctx(a.config()).memory_set("secret", "only-a")
     assert b.ctx(b.config()).memory_get("secret") is None
+
+
+def test_instagram_reel_uploads_file_directly_without_public_url(tmp_path):
+    import httpx
+    from integrations.social.publishers import InstagramPublisher
+    video = tmp_path / "r.mp4"
+    video.write_bytes(b"\x00" * 1234)
+    calls, polls = [], iter(["IN_PROGRESS", "FINISHED"])
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append((req.method, req.url.host, req.url.path, dict(req.headers)))
+        if req.url.path.endswith("/media") and req.url.params.get("upload_type") == "resumable":
+            return httpx.Response(200, json={"id": "c1", "uri": "https://rupload.facebook.com/ig-api-upload/v21.0/c1"})
+        if req.url.host == "rupload.facebook.com":
+            assert req.headers["file_size"] == "1234" and req.headers["offset"] == "0" and len(req.content) == 1234
+            return httpx.Response(200, json={"success": True})
+        if req.url.path.endswith("/c1"):
+            return httpx.Response(200, json={"status_code": next(polls)})
+        if req.url.path.endswith("/media_publish"):
+            return httpx.Response(200, json={"id": "m9"})
+        return httpx.Response(404)
+
+    pub = InstagramPublisher(token="t", ig_user_id="u1", transport=httpx.MockTransport(handler))
+    out = pub.publish_reel_file(video, "caption", sleep=lambda s: None)
+    assert out["platform_id"] == "m9"
+    assert [c[1] for c in calls] == ["graph.facebook.com", "rupload.facebook.com", "graph.facebook.com",
+                                     "graph.facebook.com", "graph.facebook.com"]
+    assert calls[1][3]["authorization"] == "OAuth t"
+
+    def failing(req):
+        if req.url.path.endswith("/media"):
+            return httpx.Response(200, json={"id": "c2"})
+        if req.url.host == "rupload.facebook.com":
+            return httpx.Response(200, json={"success": True})
+        return httpx.Response(200, json={"status_code": "ERROR", "status": "bad codec"})
+    pub = InstagramPublisher(token="t", ig_user_id="u1", transport=httpx.MockTransport(failing))
+    with pytest.raises(Exception, match="could not process"):
+        pub.publish_reel_file(video, "c", sleep=lambda s: None)
+
+
+def test_linkedin_video_upload_parts_finalize_and_post(tmp_path):
+    import httpx
+    from integrations.social.publishers import LinkedInPublisher
+    video = tmp_path / "v.mp4"
+    video.write_bytes(bytes(range(256)) * 40)          # 10240 bytes, two parts
+    seen = {"parts": [], "finalize": None, "post": None}
+    status = iter(["PROCESSING", "AVAILABLE"])
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.headers.get("linkedin-version", "202609") == "202609" or req.method == "PUT"
+        if "initializeUpload" in str(req.url):
+            return httpx.Response(200, json={"value": {"video": "urn:li:video:V1", "uploadToken": "tok", "uploadInstructions": [
+                {"uploadUrl": "https://up.example/1", "firstByte": 0, "lastByte": 4999},
+                {"uploadUrl": "https://up.example/2", "firstByte": 5000, "lastByte": 10239}]}})
+        if req.method == "PUT":
+            seen["parts"].append(len(req.content))
+            return httpx.Response(200, headers={"etag": f'"e{len(seen["parts"])}"'})
+        if "finalizeUpload" in str(req.url):
+            import json
+            seen["finalize"] = json.loads(req.content)
+            return httpx.Response(200)
+        if req.url.path.startswith("/rest/videos/"):
+            return httpx.Response(200, json={"status": next(status)})
+        if req.url.path == "/rest/posts":
+            import json
+            seen["post"] = json.loads(req.content)
+            return httpx.Response(201, headers={"x-restli-id": "urn:li:share:7"})
+        return httpx.Response(404)
+
+    pub = LinkedInPublisher(token="t", author_urn="urn:li:person:me", transport=httpx.MockTransport(handler))
+    out = pub.publish_video_file(video, "text", title="T", sleep=lambda s: None)
+    assert out["platform_id"] == "urn:li:share:7"
+    assert seen["parts"] == [5000, 5240]
+    assert seen["finalize"]["finalizeUploadRequest"]["uploadedPartIds"] == ["e1", "e2"]
+    assert seen["post"]["content"]["media"]["id"] == "urn:li:video:V1"
+    assert pub.publish_text("hi")["platform_id"] == "urn:li:share:7"

@@ -52,7 +52,9 @@ def main() -> None:
         def log_message(self, *a):
             pass
 
-    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    # Inside Docker (docs/SETUP_GUIDE.md): OAUTH_BIND=0.0.0.0 OAUTH_PORT=8765 with -p 127.0.0.1:8765:8765,
+    # so the browser on your PC reaches the container while Google still sees a loopback redirect.
+    srv = http.server.HTTPServer((os.environ.get("OAUTH_BIND", "127.0.0.1"), int(os.environ.get("OAUTH_PORT", "0"))), H)
     redirect = f"http://127.0.0.1:{srv.server_port}"
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
         "client_id": cid, "redirect_uri": redirect, "response_type": "code", "scope": " ".join(SCOPES),

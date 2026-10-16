@@ -1,0 +1,24 @@
+# Your accounts (see brands.example.yaml for every option).
+# Each piece of work you log (/work on Telegram, or the Monday plan) becomes one
+# post per brand per channel below, written in that brand's voice.
+# Channel ids: connect the account in Postiz, then copy its id here.
+# POSTIZ_API_KEY goes in .env, never here.
+brands:
+  - id: cuenotch
+    name: cue.notch
+    handle: "@cue.notch"
+    about: ""          # TODO one line: what cue.notch is about
+    audience: ""       # TODO who it is for
+    voice: "first-person build log: what I built, the problem, what worked, one lesson; calm, specific, no hype"
+    topics: []
+    channels:
+      linkedin: {postiz_integration: ""}
+  - id: msthinks
+    name: msthinks
+    handle: "@msthinks"
+    about: ""          # TODO
+    audience: ""       # TODO
+    voice: "short, visual, one idea per reel; hook under 8 words; curious and plain-spoken"
+    topics: []
+    channels:
+      instagram: {postiz_integration: ""}

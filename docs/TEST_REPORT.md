@@ -1,6 +1,6 @@
 # Test report
 
-Run: `python -m pytest -q` → **82 passed** (2026-10-16, Python 3.12, SQLite WAL).
+Run: `python -m pytest -q` → **93 passed** (2026-10-16, Python 3.12, SQLite WAL).
 Lint: `ruff check --select F .` → clean. Dashboard: `npm run build` → passes.
 
 Automated tests use fakes for every outside service (`tests/helpers.py`:
@@ -16,6 +16,8 @@ prove that a real provider accepts the call.
 | opportunity scout end-to-end | 2 |
 | owner loop (notifications, buttons, confirm/skip, profile, outcomes, housekeeping, reliability) | 21 |
 | security and policies | 18 |
+| specialists: LinkedIn video, Instagram reel upload | 2 |
+| brands, Postiz, idea scout, email applications, source filter (`test_brands_and_ideas.py`) | 9 |
 
 ## The 24 acceptance criteria
 
@@ -74,6 +76,7 @@ prove that a real provider accepts the call.
 ## Not tested live (network blocked from the build environment)
 
 Telegram (messages and buttons), Gmail, Google Calendar, LinkedIn, Instagram,
+Postiz, the idea-scout APIs (GitHub, Hugging Face, HN Algolia, arXiv),
 all six opportunity sources, all model providers, Syncthing, Let's Encrypt
 certificates, optional Redis wake-ups. See [INTEGRATIONS](INTEGRATIONS.md) for
 the first-run checklist. None of these should be considered working until that

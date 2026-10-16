@@ -54,10 +54,70 @@ def keywords(text: str, n: int = 6) -> list[str]:
 
 @register("knowledge")
 class KnowledgeAgent(Agent):
-    accepts = {"ingest_url", "find_context"}
+    accepts = {"ingest_url", "find_context", "idea_scout"}
 
     def handlers(self):
-        return {"ingest_url": self.ingest_url, "find_context": self.find_context}
+        return {"ingest_url": self.ingest_url, "find_context": self.find_context, "idea_scout": self.idea_scout}
+
+    def idea_scout(self, ctx: AgentContext, task: Task) -> dict:
+        """Daily: what is rising on GitHub, Hugging Face, Show HN and arXiv, turned into project ideas for you."""
+        from integrations.trends.signals import collect
+        from ..sources.registry import load_profile
+        prof = load_profile()
+        interests = [str(i) for i in prof.get("interests") or []]
+        cfg = prof.get("idea_scout") or {}
+        collector = ctx.services.get("trend_collector") or collect
+        items, errors = collector(cfg)
+        if not items:
+            raise PermanentError("no trend source answered: " + "; ".join(errors))
+        words = [w.lower() for w in interests]
+        rel_score = lambda x: sum(w in f"{x['title']} {x['summary']} {' '.join(map(str, x['tags']))}".lower() for w in words)
+        items.sort(key=lambda x: (-rel_score(x), -float(x["score"] or 0)))
+        ideas, method = [], "list"
+        if ctx.has_model("summarize"):
+            sig = "\n".join(f"[{i}] {x['source']}: {x['title']}: {x['summary']} ({x['url']})" for i, x in enumerate(items[:40]))
+            prompt = ("From these trending signals, propose 6-8 portfolio project ideas a student could build in 1-3 weekends. "
+                      f"My interests: {', '.join(interests) or 'AI and software'}. Prefer ideas that combine a rising tool with a real "
+                      "Indian or student use case and that make a good build-in-public post. Reply JSON: {\"ideas\": [{\"title\": str, "
+                      "\"pitch\": str, \"why_now\": str, \"stack\": str, \"first_step\": str, \"signals\": [int]}]}. "
+                      "Signals are indexes of the items that inspired it; do not invent facts about them.\nSIGNALS:\n" + untrusted(sig, 9000))
+            try:
+                d = ctx.llm("summarize", prompt, max_tokens=1800).json()
+                for it in d.get("ideas", [])[:8]:
+                    refs = [items[i] for i in it.get("signals", []) if isinstance(i, int) and 0 <= i < len(items[:40])]
+                    ideas.append({**{k: str(it.get(k, ""))[:400] for k in ("title", "pitch", "why_now", "stack", "first_step")}, "refs": refs})
+                method = "model"
+            except Exception as e:  # noqa: BLE001
+                ctx.log(f"idea drafting failed, writing the signal list only: {e}", level="warning")
+        stamp = datetime.now(ZoneInfo(get_settings().timezone))
+        rel = f"02 Knowledge/Project Ideas/{stamp:%Y-%m-%d} trending project ideas.md"
+        lines = [f"# Trending project ideas, {stamp:%d %b %Y}", ""]
+        if ideas:
+            lines += ["## Ideas for you", ""]
+            for i, it in enumerate(ideas, 1):
+                lines += [f"### {i}. {it['title']}", "", it["pitch"], "", f"- **Why now:** {it['why_now']}", f"- **Stack:** {it['stack']}",
+                          f"- **First step:** {it['first_step']}"]
+                lines += [f"- Inspired by: [{r['title']}]({r['url']})" for r in it["refs"][:3]] + [""]
+        else:
+            lines += ["_No model configured, so here are the raw signals. Add GEMINI_API_KEY to get ideas written for you._", ""]
+        lines += ["## What's rising", ""]
+        for src in ("GitHub", "Hugging Face models", "Hugging Face spaces", "Show HN", "arXiv"):
+            rows = [x for x in items if x["source"] == src][:8]
+            if rows:
+                lines += [f"### {src}", ""] + [f"- [{x['title']}]({x['url']}): {x['summary'][:160]}" for x in rows] + [""]
+        if errors:
+            lines += ["## Sources that failed this week", ""] + [f"- {e}" for e in errors] + [""]
+        fm = {"title": f"Trending project ideas {stamp:%Y-%m-%d}", "source_type": "idea_scout", "captured_at": stamp.replace(microsecond=0).isoformat(),
+              "processing_status": "processed", "summarized_by": method, "topics": ["Project Ideas"]}
+        vault = ctx.services.get("vault")
+        key = f"ideas:{stamp:%Y-%m-%d}"
+        if vault is not None:
+            ctx.act("vault.write", f"vault:{key}", lambda r: {**vault.upsert_note(key, rel, fm, "\n".join(lines), ctx.bot.id), "evidence": rel},
+                    target=rel, wait_on_approval=False)
+        if ideas:
+            ctx.notify_owner("💡 Project ideas this week:\n" + "\n".join(f"• {it['title']}" for it in ideas[:5]) + f"\n(full note: {rel})",
+                             key=key)
+        return {"ideas": len(ideas), "signals": len(items), "errors": errors, "note": rel if vault is not None else None, "method": method}
 
     def _vault(self, ctx: AgentContext):
         v = ctx.services.get("vault")

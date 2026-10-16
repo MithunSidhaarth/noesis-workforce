@@ -1,5 +1,7 @@
 # Manual steps (only you can do these)
 
+Short version for your own setup: [SETUP_GUIDE](SETUP_GUIDE.md).
+
 These need your accounts, your identity or your judgement. Do them in order;
 each one has a check so you know it worked. Details are in
 [DEPLOYMENT](DEPLOYMENT.md) and [INTEGRATIONS](INTEGRATIONS.md).
@@ -44,7 +46,7 @@ each one has a check so you know it worked. Details are in
     `scripts/google_oauth.py` on your own computer. Read and draft only.
 13. **Turn off dry-run** after a few days of reading the *External actions*
     log: dashboard *Settings* or `noesisctl.py dry-run off`.
-14. **LinkedIn / Instagram publishing**: developer apps, then the account
+14. **LinkedIn / Instagram publishing**: Postiz or developer apps ([SETUP_GUIDE](SETUP_GUIDE.md) step 5), then the account
     allowlist and `enabled: true` in `policies/publishing.yaml`.
 15. **Email sending or outreach**: flip the switches in `policies/email.yaml`
     and `policies/outreach.yaml`. Each send still asks for your approval.

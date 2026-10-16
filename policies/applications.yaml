@@ -1,6 +1,15 @@
-# Applications Agent submission policy. No auto-submission rules by default.
+# Applications Agent submission policy.
 version: 1
-auto_submit_rules: []
+# Auto-submit only when a rule matches AND the opportunity is verified, you are
+# eligible, nothing is missing and every answer comes from your verified profile.
+auto_submit_rules:
+  # One tap: an opportunity you confirmed yourself (/confirm or the Prepare button)
+  # is sent as soon as its application is complete. Email/API only; web forms
+  # always come back to you. Global dry-run still blocks real sends.
+  - name: approved-by-me
+    require_owner_confirmed: true
+    submission_methods: [email, api]
+max_auto_submits_per_day: 5
 # Example rule (disabled):
 # - name: devfolio-hackathons
 #   opportunity_types: [hackathon]

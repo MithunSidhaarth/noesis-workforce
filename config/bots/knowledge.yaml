@@ -7,3 +7,5 @@ tools: [web.fetch, vault.write]
 can_message: [orchestrator, content_strategist, outreach, applications, quality]
 knowledge_access: [read, write]
 model: {default_capability: summarize, allowed_tiers: [none, cheap], daily_call_limit: 40, daily_budget_usd: 0.05}
+schedules:
+  - {name: daily_ideas, kind: idea_scout, at: "07:30"}

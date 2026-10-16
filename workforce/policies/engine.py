@@ -97,10 +97,11 @@ class PolicyEngine:
                               policy=d.policy if d else "global")
 
     # ---- action rules ---------------------------------------------------
-    def _count_actions(self, action: str, since: float, statuses=("succeeded",)) -> int:
+    def _count_actions(self, action: str, since: float, statuses=("succeeded",), target: str | None = None) -> int:
+        extra, args = (" AND target=?", (target,)) if target is not None else ("", ())
         return self.db.scalar(
-            f"SELECT COUNT(*) FROM external_actions WHERE action=? AND created_at>=? AND status IN ({','.join('?' * len(statuses))})",
-            (action, since, *statuses)) or 0
+            f"SELECT COUNT(*) FROM external_actions WHERE action=? AND created_at>=? AND status IN ({','.join('?' * len(statuses))}){extra}",
+            (action, since, *statuses, *args)) or 0
 
     def _day_start(self) -> float:
         tz = ZoneInfo(get_settings().timezone)
@@ -134,9 +135,10 @@ class PolicyEngine:
             deny.append("claims not verified")
         if deny:
             return PolicyDecision(decision=Decision.deny, reasons=deny, policy="publishing")
-        if self._count_actions("social.publish", self._day_start()) >= p.get("max_posts_per_day", 1):
+        per = req.target if p.get("caps_per_account") else None
+        if self._count_actions("social.publish", self._day_start(), target=per) >= p.get("max_posts_per_day", 1):
             return self._cap("daily post cap reached", "publishing")
-        if self._count_actions("social.publish", now() - 7 * 86400) >= p.get("max_posts_per_week", 4):
+        if self._count_actions("social.publish", now() - 7 * 86400, target=per) >= p.get("max_posts_per_week", 4):
             return self._cap("weekly post cap reached", "publishing", weekly=True)
         return PolicyDecision(decision=Decision.allow, reasons=reasons or ["publishing policy satisfied"], policy="publishing")
 
@@ -181,6 +183,8 @@ class PolicyEngine:
             problems.append("no explicit auto-submit rule matches")
         if problems:
             return PolicyDecision(decision=Decision.require_approval, reasons=problems, policy="applications")
+        if self._count_actions("application.submit", self._day_start()) >= p.get("max_auto_submits_per_day", 5):
+            return self._cap("daily auto-submit cap reached", "applications")
         return PolicyDecision(decision=Decision.allow, reasons=[f"matched rule {rule['name']}"], policy="applications")
 
     def _outreach_rule(self, req: ActionRequest) -> PolicyDecision:
@@ -208,6 +212,8 @@ def _rule_matches(rule: dict, a: dict) -> bool:
     if rule.get("domains") and not any((a.get("domain") or "").endswith(d) for d in rule["domains"]):
         return False
     effort_rank = {"low": 0, "medium": 1, "high": 2}
+    if rule.get("require_owner_confirmed") and not a.get("owner_confirmed"):
+        return False
     if rule.get("max_effort") and effort_rank.get(a.get("effort", "high"), 2) > effort_rank[rule["max_effort"]]:
         return False
     return True
