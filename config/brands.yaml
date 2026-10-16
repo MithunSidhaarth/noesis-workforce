@@ -2,23 +2,25 @@
 # Each piece of work you log (/work on Telegram, or the Monday plan) becomes one
 # post per brand per channel below, written in that brand's voice.
 # Channel ids: connect the account on zernio.com (free for 2 accounts) and copy its
-# account id into zernio_account (or use Postiz instead). API keys go in .env, never here.
+# account id into zernio_account (scripts/zernio_accounts.py lists them). API keys go in .env, never here.
 brands:
   - id: cuenotch
     name: cue.notch
     handle: "@cue.notch"
-    about: ""          # TODO one line: what cue.notch is about
-    audience: ""       # TODO who it is for
+    about: "Cue, a free open-source Windows app that gives your screen a notch, with Tock living inside it"
+    audience: "Windows users and devs who like customizing their desktop"
+    voice: "playful, short, show-don't-tell; demos of Cue and Tock, release notes, behind-the-build"
+    link: "https://cue.mithunsidhaarth.in"
+    topics: [cue, notch, tock]
+    channels:
+      instagram: {zernio_account: "", postiz_integration: ""}
+  - id: msthinks
+    name: msthinks
+    handle: "msthinks"
+    about: "Mithun's personal brand: an AI/ML student at BMSCE building AI and full-stack products"
+    audience: "recruiters, engineers and fellow students"
     voice: "first-person build log: what I built, the problem, what worked, one lesson; calm, specific, no hype"
+    link: "https://mithunsidhaarth.in"
     topics: []
     channels:
       linkedin: {zernio_account: "", postiz_integration: ""}
-  - id: msthinks
-    name: msthinks
-    handle: "@msthinks"
-    about: ""          # TODO
-    audience: ""       # TODO
-    voice: "short, visual, one idea per reel; hook under 8 words; curious and plain-spoken"
-    topics: []
-    channels:
-      instagram: {zernio_account: "", postiz_integration: ""}

@@ -15,6 +15,7 @@ brands:
     about: ""          # one line: what the brand is about
     audience: ""       # who it is for
     voice: ""          # e.g. "technical build-log, calm, no hype"
+    link: ""           # optional: Instagram posts say "link in bio", LinkedIn posts include it
     topics: []         # optional keywords; work mentioning them goes to this brand (empty = every piece of work)
     channels:
       instagram: {zernio_account: "", postiz_integration: ""}

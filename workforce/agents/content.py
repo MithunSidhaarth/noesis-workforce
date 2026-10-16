@@ -159,11 +159,13 @@ class ContentStudio(Agent):
                 ctx.log(f"model draft failed, using template: {e}", level="warning")
         if method == "template":
             pts = [s.get("summary") or s.get("title") for s in sources if s.get("summary") or s.get("title")][:3]
+            from ..brands import get_brand, link_line
+            cta = link_line(get_brand(item["brand"]), brief["platform"])
             links = [s["url"] for s in sources[:3] if s.get("url")]
             if brief["platform"] == "instagram":
-                body = f"{brief['angle']}\n\n" + "\n".join(f"→ {p[:120]}" for p in pts) + f"\n\n{brief['cta']}"
+                body = f"{brief['angle']}\n\n" + "\n".join(f"→ {p[:120]}" for p in pts) + f"\n\n{brief['cta']}" + (f"\n{cta}" if cta else "")
             else:
-                body = (f"{brief['angle']}.\n\n" + "\n".join(f"• {p[:220]}" for p in pts) + f"\n\n{brief['cta']}"
+                body = (f"{brief['angle']}.\n\n" + "\n".join(f"• {p[:220]}" for p in pts) + f"\n\n{brief['cta']}" + (f"\n{cta}" if cta else "")
                         + ("\n\nSources: " + ", ".join(links) if links else ""))
             scenes = [{"text": brief["angle"], "narration": brief["angle"], "duration": 3}] + \
                      [{"text": p[:90], "narration": p[:160], "duration": 4} for p in pts] + \

@@ -47,4 +47,13 @@ def voice_text(brand: dict | None) -> str:
     for k in ("about", "audience", "voice"):
         if brand.get(k):
             parts.append(f"{k.capitalize()}: {brand[k]}")
+    if brand.get("link"):
+        parts.append(f"Link: {brand['link']} (Instagram: say 'link in bio', never paste the URL; LinkedIn: include the URL once at the end)")
     return "\n".join(parts)
+
+
+def link_line(brand: dict | None, platform: str) -> str:
+    """Closing call-to-action for template drafts when the brand has a link."""
+    if not brand or not brand.get("link"):
+        return ""
+    return "Link in bio." if platform == "instagram" else f"Try it: {brand['link']}"
