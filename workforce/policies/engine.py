@@ -218,9 +218,12 @@ class ActionGateway:
             return ExternalActionResult(id=prior["id"], idempotency_key=req.idempotency_key, action=req.action,
                                         status="duplicate", dry_run=bool(prior["dry_run"]), evidence=prior["evidence"],
                                         result=loads(prior["result_json"], {}) or {})
-        granted = self._approval_granted(req)
-        if granted:
-            req = req.model_copy(update={"attributes": {**req.attributes, "approval_granted": True}})
+        # approval can only come from a human decision stored in the approvals table;
+        # an agent (or text it was fed) can never assert it.
+        attrs = {k: v for k, v in req.attributes.items() if k != "approval_granted"}
+        if self._approval_granted(req):
+            attrs["approval_granted"] = True
+        req = req.model_copy(update={"attributes": attrs})
         decision = self.engine.evaluate(req, bot)
         aid = prior["id"] if prior else new_id("act")
 
