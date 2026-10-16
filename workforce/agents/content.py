@@ -168,9 +168,11 @@ class ContentStudio(Agent):
                       "Only claim features named in ABOUT. Never say download, free, available now or launch.\n"
                       "It must be about a different angle from every hook already used:\n- "
                       + "\n- ".join(sorted(used)[-40:] or ["(none yet)"]) +
-                      "\nReply JSON: {\"hook\": str (max 7 words), \"beats\": [{\"text\": str (max 50 chars), \"clip\": str, "
-                      "\"secs\": number 2.5-4}] (3 beats), \"cta\": str (max 6 words), \"caption\": str (hook line, 2-3 short lines, "
-                      "'Link in bio.', then 3-5 hashtags; under 600 chars)}")
+                      "\nWrite like a top tech creator: the hook is a pattern break or bold claim the viewer can't scroll past. "
+                      "Reply JSON: {\"hook\": str (on-screen sticker, max 6 words, CAPS), \"shots\": [{\"say\": str (one spoken "
+                      "sentence, max 14 words, may start with one direction tag like [excited]), \"clip\": str, \"from\": number}] "
+                      "(4-5 shots; the first says the hook out loud), \"cta\": str (max 3 words, CAPS), \"caption\": str (hook line, "
+                      "2-3 short lines, 'Link in bio.', then 4-5 hashtags; under 600 chars)}")
             for _ in range(2):
                 try:
                     d = ctx.llm("write", prompt, max_tokens=900).json()
@@ -186,12 +188,22 @@ class ContentStudio(Agent):
                              "or set GEMINI_API_KEY.", key=f"reels-empty:{bid}:{int(now() // 86400)}")
             return {"brand": bid, "waiting": waiting, "made": 0, "reason": "no unused script"}
         out = Path(get_settings().data_dir) / "media" / "ready" / f"{bid}-{sha(rl.norm(script['hook']))[:10]}.mp4"
-        info = render_cue_reel(script, out)
+        from integrations.video.voice import from_env as voice_from_env
+        voice = voice_from_env()
+        try:
+            info = render_cue_reel(script, out, voice=voice)
+        except Exception as e:  # noqa: BLE001
+            if voice is None:
+                raise
+            ctx.log(f"voiceover failed ({e}); rendering with captions only", level="warning")
+            ctx.notify_owner(f"🎬 Reel voiceover didn't work\n\n{voice.name} failed: {str(e)[:200]}\n"
+                             "This reel uses captions only.", key=f"voicefail:{voice.name}:{int(now() // 86400)}")
+            info = render_cue_reel(script, out)
         at = rl.next_slot(ctx.db, bid, float(cfg["every_hours"]), str(cfg["window"]))
         tid, _ = ctx.enqueue_self("post_ready_reel", {
             "path": info["path"], "caption": str(script["caption"]).strip(), "title": script["hook"], "hook": script["hook"],
             "brand": bid, "series": f"{bid}-auto", "license": "generated-by-noesis (Cue footage, Motion-as-code SFX)",
-            "script": {k: script.get(k) for k in ("hook", "beats", "cta")}}, idempotency_key=f"auto-reel:{bid}:{rl.norm(script['hook'])}",
+            "voice": info.get("voice"), "script": {k: script.get(k) for k in ("hook", "shots", "beats", "cta")}}, idempotency_key=f"auto-reel:{bid}:{rl.norm(script['hook'])}",
             run_after=at)
         return {"brand": bid, "waiting": waiting + 1, "made": 1, "method": method, "hook": script["hook"], "at": at, "task": tid}
 

@@ -166,8 +166,10 @@ def test_refill_makes_new_reels_with_unused_scripts_only(env, services):
         {"id": "cue", "name": "Cue", "topics": ["cue"], "reels": {"every_hours": 3, "window": "00:00-23:59", "keep_queued": 2},
          "channels": {"instagram": {"zernio_account": "acc1"}}}]}))
     bank = env.config.parent / "scripts.yaml"
-    sc = lambda hook: {"hook": hook, "cta": "Cue.", "caption": f"{hook}\nLink in bio. #windows",  # noqa: E731
-                       "beats": [{"text": "one", "clip": "hover", "secs": 1.5}, {"text": "two", "clip": "done", "secs": 1.5}]}
+    sc = lambda hook: {"hook": hook, "cta": "LINK IN BIO", "caption": f"{hook}\nLink in bio. #windows",  # noqa: E731
+                       "shots": [{"say": f"{hook}, said out loud.", "clip": "hover"},
+                                 {"say": "Approve your agent from the notch.", "clip": "agent"},
+                                 {"say": "Tock smiles when it passes.", "clip": "tock-task-done"}]}
     bank.write_text(yaml.safe_dump({"scripts": [sc("Meet Tock"), sc("Meet Tock!"), sc("Approve from the notch")]}))
     from workforce.contracts import TaskSpec
     for n in range(3):
@@ -220,3 +222,31 @@ def test_template_drafts_never_publish_without_approval(env):
     run(services, ["content_studio"], rounds=10)
     assert Pub.sent == ["body mdl"]
     assert env.db.scalar("SELECT COUNT(*) FROM approvals WHERE status='pending' AND action='social.publish'") == 1
+
+
+def test_voice_providers_return_audio_and_captions_follow_the_words(tmp_path):
+    import base64
+    from integrations.video.cue_reel import chunks, timings
+    from integrations.video.voice import ElevenLabsVoice, GeminiVoice, plain
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append((req.url.host, req.headers.get("xi-api-key") or req.headers.get("x-goog-api-key"), json.loads(req.content)))
+        if req.url.host == "api.elevenlabs.io":
+            return httpx.Response(200, content=b"ID3fake-mp3")
+        pcm = base64.b64encode(b"\x00\x00" * 2400).decode()
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "audio/L16;rate=24000", "data": pcm}}]}}]})
+
+    t = httpx.MockTransport(handler)
+    ElevenLabsVoice("k1", "v1", model="eleven_v3", transport=t).say("[excited] Hit Enter.", tmp_path / "a.mp3")
+    assert seen[0][1] == "k1" and seen[0][2]["text"] == "[excited] Hit Enter." and (tmp_path / "a.mp3").read_bytes() == b"ID3fake-mp3"
+    ElevenLabsVoice("k1", "v1", model="eleven_multilingual_v2", transport=t).say("[excited] Hit Enter.", tmp_path / "b.mp3")
+    assert seen[1][2]["text"] == "Hit Enter."                       # older models would read the tag aloud
+    if shutil.which("ffmpeg"):
+        GeminiVoice("k2", transport=t).say("[softly] And falls asleep.", tmp_path / "c.mp3")
+        assert seen[2][1] == "k2" and "softly" in seen[2][2]["contents"][0]["parts"][0]["text"] and (tmp_path / "c.mp3").stat().st_size > 0
+    assert plain("[fast] Stop  it.") == "Stop it."
+    parts = chunks("[fast] Stop alt-tabbing to babysit your AI agent.")
+    assert parts == ["Stop", "alt-tabbing to", "babysit your AI", "agent."] and all(len(p) <= 15 for p in parts)
+    ts = timings(parts, 0.1, 2.1)
+    assert ts[0][0] == 0.1 and abs(ts[-1][1] - 2.1) < 1e-9 and all(a < b for a, b in ts)

@@ -208,7 +208,8 @@ queue. With fewer than 2 reels waiting it writes a script no reel has used
 (the starters in `assets/cue/scripts.yaml` first, then Gemini), renders it from
 real footage of Cue and Tock with the Motion kit's sound effects and fonts, and
 queues it for the next slot. Settings: `reels:` under the cue brand in
-`config/brands.yaml`.
+`config/brands.yaml`. Voiceover: ElevenLabs if `ELEVENLABS_API_KEY` is set,
+otherwise Gemini's text-to-speech with your Gemini key, otherwise captions only.
 
 ## Your daily rhythm
 

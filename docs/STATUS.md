@@ -5,7 +5,7 @@ Last updated: 2026-10-16. Branch `main`.
 ## Summary
 
 All ten bots, the runtime, dashboard, Telegram command centre, policies and
-deployment are implemented and pass 102 automated tests. The Docker stack builds
+deployment are implemented and pass 103 automated tests. The Docker stack builds
 and runs healthy. **No outside service has been called live yet**, so every
 integration is "implemented, tested with fakes, waiting for your first real run".
 
@@ -42,6 +42,10 @@ integration is "implemented, tested with fakes, waiting for your first real run"
   `refill_reels` (hourly) renders a new reel from an unused script (starter bank,
   then the model) using recorded Cue/Tock footage, Motion-kit SFX and fonts.
   @msthinks has its own caps (5/day, 30/week) in `account_caps`.
+- Reel renderer v2: blurred full-frame backdrop, word-by-word captions, xfade
+  cuts (the old fade-from-black flashed at every cut), voiceover from
+  ElevenLabs or Gemini TTS (`integrations/video/voice.py`; both tested with
+  fakes only; the owner's ElevenLabs free tier is out of credits).
 - Template drafts (written without the model) carry the `template_draft` flag
   and always need your approval, after two went out live on 16 Oct.
 - ntfy: every owner notification also pushes its headline to `NTFY_TOPIC`
