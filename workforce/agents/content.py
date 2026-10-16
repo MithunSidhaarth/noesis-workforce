@@ -63,7 +63,7 @@ class ContentStrategist(Agent):
                 raise PermanentError(f"unknown brand {brand_id!r} (config/brands.yaml)")
         else:
             brands = brands_for(f"{topic} {' '.join(str(x.get('summary') or '') for x in sources)}", brands)
-        targets = [(b["id"], pl) for b in brands for pl in (b["channels"] or {"linkedin": {}})] or [(None, "linkedin")]
+        targets = [(b["id"], pl) for b in brands for pl in b["channels"]] or [(None, "linkedin")]
         created = []
         for bid, pl in targets:
             tid, new = ctx.enqueue_self("create_brief", {"topic": topic, "platform": pl, "brand": bid, "category": category,
