@@ -18,6 +18,7 @@ from typing import Iterable
 
 from ..contracts import BotConfig, Message, MessageType
 from ..core.db import Database, dumps, get_db, loads
+from ..core.notify import wake
 from ..core.state import audit, exec_log
 from ..core.util import backoff, new_id, now, sha
 
@@ -102,6 +103,7 @@ class MessageBus:
                     continue
                 raise
             created.append(mid)
+            wake(rcpt)
         return created
 
     def reply(self, original: dict, sender: str, type_: MessageType, payload: dict, dedupe: bool = True) -> list[str]:

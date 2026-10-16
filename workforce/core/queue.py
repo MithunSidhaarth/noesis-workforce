@@ -16,6 +16,7 @@ from typing import Any
 
 from ..contracts import TERMINAL_TASK_STATES, TaskSpec
 from .db import Database, dumps, get_db, loads
+from .notify import wake
 from .state import audit, exec_log
 from .util import backoff, new_id, now
 
@@ -120,6 +121,8 @@ class TaskQueue:
                  spec.run_after or t, spec.deadline, t, t,
                  "dependency failed" if status == "cancelled" else None),
             )
+        if status == "queued":
+            wake(spec.bot_id)
         audit(self.db, spec.requested_by, "task.enqueued", spec.correlation_id or tid,
               {"task_id": tid, "bot_id": spec.bot_id, "kind": spec.kind, "status": status})
         return tid, True

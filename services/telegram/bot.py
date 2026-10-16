@@ -135,7 +135,9 @@ def main() -> None:  # pragma: no cover - network loop
         try:
             for u in tg.get_updates(offset):
                 offset = u["update_id"] + 1
-                SystemState(db).set("telegram_offset", offset, by="telegram")
+                # bookkeeping, not a policy change: write directly so the audit log stays meaningful
+                db.execute("INSERT INTO system_state(key, value, updated_at, updated_by) VALUES ('telegram_offset', ?, ?, 'telegram') "
+                           "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (str(offset), time.time()))
                 reply = handler.handle(u)
                 if reply:
                     tg.send(u["message"]["chat"]["id"], reply)
