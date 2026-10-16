@@ -123,9 +123,11 @@ and msthinks. No developer apps.
 3. Connect **Instagram** as msthinks. It must be a Professional account
    (Instagram app → Settings → Account type → Switch to professional); no
    Facebook Page needed.
-4. Copy each account's id into `config/brands.yaml` (`zernio_account:`).
-5. Dashboard → **API keys** → create a read & write key; put it in `.env` as
-   `ZERNIO_API_KEY`.
+4. Dashboard → **API keys** → create a read & write key; put it in `.env` as
+   `ZERNIO_API_KEY` (never in chat or Git).
+5. Run `docker compose exec api python scripts/zernio_accounts.py`: it checks the
+   key with a read-only call and prints each account's id. Copy the ids into
+   `config/brands.yaml` (`zernio_account:`).
 
 ### Option A2: Postiz ($29/month)
 
