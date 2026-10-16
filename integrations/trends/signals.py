@@ -19,6 +19,15 @@ import httpx
 from workforce.core.settings import get_settings
 
 
+# Trending lists regularly include adult models and repos; never show them.
+BLOCK_WORDS = ("nsfw", "porn", "hentai", "nude", "nudity", "erotic", "sexual", "onlyfans", "undress", "xxx", "18+")
+
+
+def safe(item: dict) -> bool:
+    text = f"{item.get('title', '')} {item.get('summary', '')} {' '.join(map(str, item.get('tags') or []))}".lower()
+    return not any(w in text for w in BLOCK_WORDS)
+
+
 def _client(transport=None) -> httpx.Client:
     return httpx.Client(transport=transport, timeout=20, follow_redirects=True,
                         headers={"User-Agent": get_settings().http_user_agent})
@@ -101,4 +110,4 @@ def collect(cfg: dict | None = None, transport=None) -> tuple[list[dict], list[s
             items += fn()
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {type(e).__name__} {str(e)[:120]}")
-    return items, errors
+    return [i for i in items if safe(i)], errors

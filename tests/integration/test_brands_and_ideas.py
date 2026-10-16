@@ -149,7 +149,8 @@ def test_trend_signals_parse_official_apis():
             return httpx.Response(200, json={"items": [{"full_name": "a/b", "html_url": "https://github.com/a/b", "description": "d",
                                                         "stargazers_count": 5, "topics": ["llm"], "language": "Python"}]})
         if h == "huggingface.co":
-            return httpx.Response(200, json=[{"id": "org/model", "trendingScore": 9, "pipeline_tag": "text-generation"}])
+            return httpx.Response(200, json=[{"id": "org/model", "trendingScore": 9, "pipeline_tag": "text-generation"},
+                                             {"id": "x/NSFW-gen", "trendingScore": 99, "tags": ["not-for-all-audiences"]}])
         if h == "hn.algolia.com":
             return httpx.Response(200, json={"hits": [{"objectID": "1", "title": "Show HN: x", "points": 80, "num_comments": 3}]})
         return httpx.Response(503)
@@ -157,6 +158,7 @@ def test_trend_signals_parse_official_apis():
     items, errors = collect({"github_topics": []}, transport=httpx.MockTransport(handler))
     assert {i["source"] for i in items} == {"GitHub", "Hugging Face models", "Hugging Face spaces", "Show HN"}
     assert len(errors) == 1 and errors[0].startswith("arXiv")
+    assert not any("NSFW" in i["title"] for i in items)
 
 
 def test_email_application_uses_only_verified_answers_and_guards_attachments(tmp_path):
