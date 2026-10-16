@@ -24,7 +24,7 @@ providers:
 # Ordered by preference inside each tier. The router picks the first model whose
 # provider is configured, whose tier the bot allows, and that supports the capability.
 models:
-  - {id: gemini-flash, provider: gemini, model: gemini-2.5-flash, tier: cheap, in: 0.0, out: 0.0,
+  - {id: gemini-flash, provider: gemini, model: gemini-3.5-flash, tier: cheap, in: 0.0, out: 0.0,
      capabilities: [classify, extract, summarize, write, research]}
   - {id: groq-llama, provider: groq, model: llama-3.3-70b-versatile, tier: cheap, in: 0.0, out: 0.0,
      capabilities: [classify, extract, summarize, write]}
