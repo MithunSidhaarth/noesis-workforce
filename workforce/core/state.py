@@ -7,7 +7,7 @@ import sys
 
 from .db import Database, dumps, get_db, loads
 from .settings import get_settings
-from .util import now
+from .util import now, redact
 
 log = logging.getLogger("noesis")
 
@@ -15,12 +15,12 @@ log = logging.getLogger("noesis")
 def configure_logging(level: str = "INFO") -> None:
     class JsonFmt(logging.Formatter):
         def format(self, r: logging.LogRecord) -> str:
-            d = {"ts": round(r.created, 3), "level": r.levelname, "logger": r.name, "msg": r.getMessage()}
+            d = {"ts": round(r.created, 3), "level": r.levelname, "logger": r.name, "msg": redact(r.getMessage())}
             for k in ("bot_id", "task_id", "correlation_id"):
                 if hasattr(r, k):
                     d[k] = getattr(r, k)
             if r.exc_info:
-                d["exc"] = self.formatException(r.exc_info)
+                d["exc"] = redact(self.formatException(r.exc_info))
             return json.dumps(d, default=str)
 
     h = logging.StreamHandler(sys.stdout)
@@ -28,6 +28,9 @@ def configure_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.handlers[:] = [h]
     root.setLevel(level)
+    # httpx logs full request URLs at INFO; Telegram puts the bot token in the URL.
+    for noisy in ("httpx", "httpcore", "anthropic"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 class SystemState:
@@ -73,6 +76,7 @@ def audit(db: Database | None, actor: str, event: str, correlation_id: str | Non
 def exec_log(db: Database | None, level: str, message: str, bot_id: str | None = None, task_id: str | None = None,
              correlation_id: str | None = None, data: dict | None = None) -> None:
     db = db or get_db()
+    message = redact(message)
     db.execute(
         "INSERT INTO exec_log(ts, level, bot_id, task_id, correlation_id, message, data_json) VALUES (?,?,?,?,?,?,?)",
         (now(), level, bot_id, task_id, correlation_id, message, dumps(data) if data else None),
@@ -83,6 +87,7 @@ def exec_log(db: Database | None, level: str, message: str, bot_id: str | None =
 
 def set_integration_status(db: Database | None, name: str, status: str, detail: str = "") -> None:
     db = db or get_db()
+    detail = redact(detail or "")
     t = now()
     ok = status in ("ok", "mock")
     db.execute(

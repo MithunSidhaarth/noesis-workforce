@@ -169,3 +169,43 @@ def test_telegram_rejects_unauthorized_users(env, services):
     assert SystemState(env.db).paused and "paused" in out.lower()
     # owner id in a group chat is still refused (only private chat)
     assert h.handle({"message": {"from": {"id": 111}, "chat": {"id": -5, "type": "group"}, "text": "/resume"}}) is None
+
+
+def test_every_external_action_has_auditable_result(env, services):
+    """Acceptance 22: each action attempt leaves an external_actions row with its outcome
+    and evidence (or error), plus a matching audit-log entry."""
+    SIDE_EFFECTS.clear()
+
+    def boom(req):
+        from workforce.policies.engine import IntegrationError
+        raise IntegrationError("provider returned 500")
+
+    g = gw(env)
+    g.execute(ActionRequest(bot_id="echo_a", action="telegram.notify_owner", idempotency_key="aud-ok"), bot(services), ok_exec)
+    g.execute(ActionRequest(bot_id="opportunity_scout", action="email.send", target="a@b.c", idempotency_key="aud-blocked"),
+              bot(services, "opportunity_scout"), ok_exec)
+    try:
+        g.execute(ActionRequest(bot_id="echo_a", action="telegram.notify_owner", idempotency_key="aud-fail"), bot(services), boom)
+    except Exception:  # noqa: BLE001 - the gateway re-raises after recording
+        pass
+    rows = {r["idempotency_key"]: r for r in env.db.all("SELECT * FROM external_actions")}
+    assert rows["aud-ok"]["status"] == "succeeded" and rows["aud-ok"]["evidence"] == "real-call"
+    assert rows["aud-blocked"]["status"] == "blocked" and rows["aud-blocked"]["error"]
+    assert rows["aud-fail"]["status"] == "failed" and "500" in rows["aud-fail"]["error"]
+    events = [r["event"] for r in env.db.all("SELECT event FROM audit_log")]
+    for s in ("action.succeeded", "action.blocked", "action.failed"):
+        assert s in events
+
+
+def test_secrets_are_redacted_from_logs_and_errors(env, services):
+    import logging
+    from workforce.core.state import configure_logging, exec_log
+    from workforce.core.util import redact
+    tok = "123456789:AAH" + "x" * 32
+    assert tok not in redact(f"POST https://api.telegram.org/bot{tok}/sendMessage")
+    assert "sk-ant-api03" not in redact("auth failed for sk-ant-api03-abcdefghijklmnop")
+    assert "s3cr3t" not in redact("https://x/token?client_secret=s3cr3t&a=1")
+    exec_log(env.db, "error", f"failed calling https://api.telegram.org/bot{tok}/getMe")
+    assert tok not in env.db.scalar("SELECT message FROM exec_log ORDER BY id DESC LIMIT 1")
+    configure_logging()
+    assert logging.getLogger("httpx").level >= logging.WARNING

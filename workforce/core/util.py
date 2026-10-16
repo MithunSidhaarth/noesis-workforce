@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import hashlib
 import random
 import time
@@ -40,3 +42,23 @@ def utc_iso(ts: float | None) -> str | None:
     if ts is None:
         return None
     return datetime.fromtimestamp(ts, timezone.utc).replace(microsecond=0).isoformat()
+
+
+_SECRET_PATTERNS = [
+    (re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}"), "bot<redacted>"),                    # Telegram bot token in URLs
+    (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{12,}"), r"\1<redacted>"),
+    (re.compile(r"(?i)((?:access_token|refresh_token|client_secret|api_key|key|token)=)[^&\s\"']+"), r"\1<redacted>"),
+    (re.compile(r"sk-ant-[A-Za-z0-9_-]{10,}"), "sk-ant-<redacted>"),
+    (re.compile(r"gsk_[A-Za-z0-9]{20,}"), "gsk_<redacted>"),
+    (re.compile(r"AIza[0-9A-Za-z_-]{30,}"), "AIza<redacted>"),
+    (re.compile(r"1//[0-9A-Za-z_-]{30,}"), "<redacted-google-refresh-token>"),
+]
+
+
+def redact(text: str) -> str:
+    """Remove credentials from text before it reaches logs or the database."""
+    if not text:
+        return text
+    for pat, rep in _SECRET_PATTERNS:
+        text = pat.sub(rep, text)
+    return text

@@ -18,7 +18,7 @@ from ..contracts import ActionRequest, BotConfig, Decision, ExternalActionResult
 from ..core.db import Database, dumps, get_db, loads
 from ..core.settings import get_settings
 from ..core.state import SystemState, audit, exec_log
-from ..core.util import new_id, now
+from ..core.util import new_id, now, redact
 
 
 class IntegrationError(Exception):
@@ -229,6 +229,7 @@ class ActionGateway:
 
         def record(status: str, result: dict | None = None, evidence: str | None = None, error: str | None = None):
             t = now()
+            error = redact(error) if error else error
             self.db.execute(
                 "INSERT INTO external_actions(id, idempotency_key, bot_id, action, target, status, dry_run, request_json, result_json, "
                 "evidence, error, task_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "

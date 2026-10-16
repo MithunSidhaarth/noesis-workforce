@@ -18,7 +18,7 @@ from ..contracts import TERMINAL_TASK_STATES, TaskSpec
 from .db import Database, dumps, get_db, loads
 from .notify import wake
 from .state import audit, exec_log
-from .util import backoff, new_id, now
+from .util import backoff, new_id, now, redact
 
 
 class QueueError(Exception):
@@ -182,6 +182,7 @@ class TaskQueue:
 
     def fail(self, task_id: str, error: str, retryable: bool = True, worker_id: str | None = None) -> str:
         """Record a failure. Returns the new status ('failed' = will retry, 'dead')."""
+        error = redact(error)
         t = now()
         with self.db.tx() as c:
             r = c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
