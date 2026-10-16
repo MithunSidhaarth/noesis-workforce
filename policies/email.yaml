@@ -1,0 +1,9 @@
+# Communications Agent email policy. Starts read + draft only.
+version: 1
+allow_send: false                 # master switch for email.send
+auto_reply_categories: []         # e.g. ["meeting_confirmation"] once you trust it
+recipient_allowlist_domains: []   # empty = no auto-send to anyone
+max_sends_per_day: 10
+calendar:
+  allow_create_event: false
+  allow_send_invites: false

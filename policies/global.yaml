@@ -1,0 +1,32 @@
+# Global authorization policy. Read-only to bots: loaded by the policy engine at
+# process start; there is no code path that lets a bot write this directory.
+version: 1
+
+# Actions that have real external side effects. Anything not listed is denied.
+actions:
+  telegram.notify_owner:   {side_effect: true, description: "Message the owner on Telegram"}
+  email.send:              {side_effect: true, description: "Send an email from an authorized account"}
+  email.draft:             {side_effect: true, description: "Create a draft in the mailbox (not sent)"}
+  calendar.create_event:   {side_effect: true, description: "Create an event on the owner's calendar"}
+  calendar.send_invite:    {side_effect: true, description: "Send calendar invitations to others"}
+  social.publish:          {side_effect: true, description: "Publish to LinkedIn / Instagram"}
+  application.submit:      {side_effect: true, description: "Submit an application to an external site"}
+  outreach.send:           {side_effect: true, description: "Send a cold / follow-up email"}
+  vault.write:             {side_effect: true, description: "Write a note into the NOESIS vault"}
+  web.fetch:               {side_effect: false, description: "Fetch a public page / feed (read-only)"}
+
+# Owner notifications still go out in dry-run so you can watch the system work.
+# Remove an entry to make dry-run silence it as well.
+dry_run_exempt:
+  - telegram.notify_owner
+  - vault.write
+
+# Any action whose attributes.flags contain one of these always needs a human.
+always_require_approval:
+  - payment
+  - purchase
+  - legal_declaration
+  - sensitive_disclosure
+  - irreversible_commitment
+  - unusual_commitment
+  - unverified_facts

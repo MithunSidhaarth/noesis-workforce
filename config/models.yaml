@@ -1,0 +1,38 @@
+# Model routing. Providers are only used when their credential env var is set.
+# Costs are USD per 1M tokens and are used for budgeting; verify against your
+# provider's current price page before relying on the numbers.
+global_daily_budget_usd: 0.50     # hard stop for all bots combined
+cache_ttl_s: 604800               # reuse identical prompt results for 7 days
+
+providers:
+  anthropic:
+    kind: anthropic               # official Anthropic SDK; needs ANTHROPIC_API_KEY (Claude Pro does NOT include API usage)
+    env: ANTHROPIC_API_KEY
+  groq:
+    kind: openai_compatible       # free tier with rate limits; availability not guaranteed
+    base_url: https://api.groq.com/openai/v1
+    env: GROQ_API_KEY
+  gemini:
+    kind: openai_compatible       # Google AI Studio free tier via the OpenAI-compatible endpoint
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    env: GEMINI_API_KEY
+  ollama:
+    kind: openai_compatible       # self-hosted; only practical on a VPS with enough RAM
+    base_url: http://ollama:11434/v1
+    env: OLLAMA_ENABLED
+
+# Ordered by preference inside each tier. The router picks the first model whose
+# provider is configured, whose tier the bot allows, and that supports the capability.
+models:
+  - {id: gemini-flash, provider: gemini, model: gemini-2.5-flash, tier: cheap, in: 0.0, out: 0.0,
+     capabilities: [classify, extract, summarize, write, research]}
+  - {id: groq-llama, provider: groq, model: llama-3.3-70b-versatile, tier: cheap, in: 0.0, out: 0.0,
+     capabilities: [classify, extract, summarize, write]}
+  - {id: claude-haiku, provider: anthropic, model: claude-haiku-5-5, tier: cheap, in: 0.10, out: 0.50, effort: low,
+     capabilities: [classify, extract, summarize, write, research, long_context, vision]}
+  - {id: claude-sonnet, provider: anthropic, model: claude-sonnet-5-5, tier: standard, in: 2.0, out: 10.0, effort: medium,
+     capabilities: [classify, extract, summarize, write, research, code, long_context, vision]}
+  - {id: claude-opus, provider: anthropic, model: claude-opus-5-5, tier: premium, in: 4.0, out: 20.0, effort: medium,
+     capabilities: [write, research, code, long_context, vision, reasoning]}
+  - {id: local-llama, provider: ollama, model: llama3.2:3b, tier: cheap, in: 0.0, out: 0.0,
+     capabilities: [classify, extract, summarize]}

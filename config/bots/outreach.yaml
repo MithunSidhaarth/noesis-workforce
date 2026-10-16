@@ -1,0 +1,11 @@
+id: outreach
+name: Outreach Agent
+purpose: Researches relevant prospects, writes individually personalized drafts, tracks outreach and follow-ups and honors opt-outs.
+agent: outreach
+instructions_file: outreach.md
+tools: [outreach.send, telegram.notify_owner]
+can_message: [quality, orchestrator, knowledge]
+model: {default_capability: write, allowed_tiers: [none, cheap], daily_call_limit: 30}
+schedules:
+  - {name: follow_ups, kind: process_follow_ups, at: "11:00"}
+  - {name: weekly_report, kind: weekly_report, at: "17:00", weekdays: fri}

@@ -1,0 +1,10 @@
+id: content_strategist
+name: Content Strategist
+purpose: Develops content ideas from your knowledge and work, maintains the calendar and writes briefs for the Content Studio.
+agent: content_strategist
+instructions_file: content_strategist.md
+tools: []
+can_message: [content_studio, knowledge, opportunity_scout, quality, orchestrator]
+model: {default_capability: write, allowed_tiers: [none, cheap], daily_call_limit: 20}
+schedules:
+  - {name: weekly_plan, kind: plan_week, at: "10:00", weekdays: mon}

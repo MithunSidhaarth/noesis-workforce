@@ -1,0 +1,12 @@
+id: content_studio
+name: Content Studio
+purpose: Writes posts, captions and reel scripts from briefs, renders videos with FFmpeg, and publishes only under the publishing policy.
+agent: content_studio
+instructions_file: content_studio.md
+tools: [social.publish, telegram.notify_owner]
+can_message: [quality, content_strategist, orchestrator]
+publish_topics: [content.ready]
+model: {default_capability: write, allowed_tiers: [none, cheap, standard], daily_call_limit: 30, daily_budget_usd: 0.15}
+task_timeout_s: 900
+settings:
+  output_dir: data/media

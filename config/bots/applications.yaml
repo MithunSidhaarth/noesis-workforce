@@ -1,0 +1,10 @@
+id: applications
+name: Applications Agent
+purpose: Checks eligibility against your verified profile, prepares truthful applications, tracks deadlines and submits only under explicit policy.
+agent: applications
+instructions_file: applications.md
+tools: [application.submit, telegram.notify_owner]
+can_message: [quality, orchestrator, personal_ops, opportunity_scout]
+publish_topics: [application.ready]
+model: {default_capability: write, allowed_tiers: [none, cheap, standard], daily_call_limit: 40, daily_budget_usd: 0.15}
+max_concurrency: 2

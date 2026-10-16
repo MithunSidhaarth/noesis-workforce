@@ -1,0 +1,9 @@
+id: personal_ops
+name: Personal Operations
+purpose: Manages tasks, reminders, deadlines, events and routine admin workflows.
+agent: personal_ops
+instructions_file: personal_ops.md
+tools: [telegram.notify_owner]
+can_message: [orchestrator, communications]
+schedules:
+  - {name: reminder_sweep, kind: send_due_reminders, every: 5m}

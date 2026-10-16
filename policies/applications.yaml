@@ -1,0 +1,15 @@
+# Applications Agent submission policy. No auto-submission rules by default.
+version: 1
+auto_submit_rules: []
+# Example rule (disabled):
+# - name: devfolio-hackathons
+#   opportunity_types: [hackathon]
+#   submission_methods: [api]
+#   max_effort: low
+#   domains: [devfolio.co]
+allowed_submission_methods: [api, email]   # never browser automation through CAPTCHA
+forbidden_requirements:                    # presence forces approval
+  - payment
+  - legal_declaration
+  - sensitive_disclosure
+  - unusual_commitment

@@ -1,0 +1,8 @@
+# Outreach Agent policy. Draft-only by default.
+version: 1
+allow_send: false
+max_sends_per_day: 5
+max_follow_ups: 2
+follow_up_after_days: 5
+require_relevance_score: 0.6
+sender_identity: "Mithun Sidhaarth"        # always shown truthfully

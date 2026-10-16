@@ -1,0 +1,23 @@
+[project]
+name = "noesis-workforce"
+version = "0.1.0"
+description = "Private, single-user autonomous AI workforce"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.6",
+  "pyyaml>=6",
+  "httpx>=0.27",
+  "feedparser>=6",
+  "beautifulsoup4>=4.12",
+  "python-dateutil>=2.9",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+]
+[project.optional-dependencies]
+anthropic = ["anthropic>=1.0"]
+redis = ["redis>=5"]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

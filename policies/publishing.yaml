@@ -1,0 +1,21 @@
+# Automatic publishing policy (Content Studio). Starts DISABLED.
+version: 1
+enabled: false
+accounts_allowlist: []            # e.g. ["linkedin:urn:li:person:XXXX", "instagram:1784..."]
+auto_categories:                  # categories that may auto-publish when every check passes
+  - educational
+  - project_update
+  - technical_learning
+  - approved_business_update
+approval_categories:              # always need you
+  - personal_announcement
+  - paid_partnership
+  - controversial
+  - legal_claim
+  - sensitive_claim
+max_posts_per_day: 1
+max_posts_per_week: 4
+require_media_validation: true
+require_duplicate_check: true
+require_license_check: true
+require_fact_check_when_claims: true
