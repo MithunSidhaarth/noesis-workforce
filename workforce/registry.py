@@ -111,4 +111,5 @@ class BotRegistry:
                 "UPDATE bots SET last_heartbeat=?, state=CASE WHEN state='paused' THEN state ELSE ? END, current_task_id=? WHERE id=?",
                 (now(), state, current_task, bot_id))
         else:
-            self.db.execute("UPDATE bots SET last_heartbeat=? WHERE id=?", (now(), bot_id))
+            self.db.execute("UPDATE bots SET last_heartbeat=?, state=CASE WHEN state='offline' THEN 'idle' ELSE state END WHERE id=?",
+                            (now(), bot_id))
