@@ -2,7 +2,7 @@
 name = "noesis-workforce"
 version = "0.1.0"
 description = "Private, single-user autonomous AI workforce"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.6",
   "pyyaml>=6",

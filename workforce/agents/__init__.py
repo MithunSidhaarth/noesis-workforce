@@ -1,1 +1,12 @@
-"""Agent classes register themselves on import."""
+"""Importing this package registers every agent class in AGENT_REGISTRY."""
+from . import (  # noqa: F401
+    applications,
+    communications,
+    content,
+    knowledge,
+    opportunity_scout,
+    orchestrator,
+    outreach,
+    personal_ops,
+    quality,
+)

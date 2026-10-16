@@ -1,0 +1,64 @@
+# Opportunity source registry. Each source documents how it is accessed.
+# Only public syndication feeds (RSS/Atom) are enabled by default: they are
+# published for automated reading. HTML sources are disabled until you have
+# checked the site's terms and robots.txt allow it.
+#
+# NOTE: these feeds could not be fetched from the cloud build environment
+# (outbound network restricted there). Verify each from your VPS with
+#   python -m scripts.check_sources
+sources:
+  - id: opportunity_desk
+    name: Opportunity Desk
+    kind: rss
+    url: https://www.opportunitydesk.org/feed/
+    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
+    interval: 6h
+    default_type: fellowship
+    official_domains: []          # aggregator: links point at its own articles, official page needs confirmation
+    enabled: true
+  - id: scholars4dev
+    name: Scholars4Dev
+    kind: rss
+    url: https://www.scholars4dev.com/feed/
+    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
+    interval: 12h
+    default_type: scholarship
+    official_domains: []
+    enabled: true
+  - id: opportunities_circle
+    name: Opportunities Circle
+    kind: rss
+    url: https://opportunitiescircle.com/feed/
+    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
+    interval: 12h
+    default_type: fellowship
+    official_domains: []
+    enabled: true
+  - id: google_news_hackathons_india
+    name: Google News · hackathons India
+    kind: rss
+    url: "https://news.google.com/rss/search?q=hackathon+registration+India&hl=en-IN&gl=IN&ceid=IN:en"
+    access_method: "Google News RSS search feed (public syndication endpoint)"
+    interval: 12h
+    default_type: hackathon
+    official_domains: []
+    enabled: true
+  - id: google_news_internships_india
+    name: Google News · AI internships India
+    kind: rss
+    url: "https://news.google.com/rss/search?q=AI+internship+applications+open+India&hl=en-IN&gl=IN&ceid=IN:en"
+    access_method: "Google News RSS search feed (public syndication endpoint)"
+    interval: 12h
+    default_type: internship
+    official_domains: []
+    enabled: true
+  - id: mlh_events
+    name: Major League Hacking events
+    kind: html
+    url: https://mlh.io/seasons/2027/events
+    access_method: "Public HTML listing; DISABLED until terms/robots are checked and selectors confirmed against the live page"
+    interval: 1d
+    default_type: hackathon
+    official_domains: [mlh.io]
+    parser: {item: ".event", title: ".event-name", link: "a", body: ".event-date"}
+    enabled: false

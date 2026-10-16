@@ -1,0 +1,24 @@
+# Your VERIFIED profile. The Applications Agent only uses facts listed under
+# `facts` with `verified: true`. Anything missing is requested from you; it is
+# never invented. Copy to config/profile.yaml (git-ignored) and fill it in.
+name: ""
+email: ""
+timezone: Asia/Kolkata
+facts: {}
+#  degree:          {value: "B.E. Computer Science", verified: true}
+#  institution:     {value: "...", verified: true}
+#  graduation_year: {value: 2027, verified: true}
+#  citizenship:     {value: "India", verified: true}
+#  location:        {value: "Bengaluru, India", verified: true}
+#  date_of_birth:   {value: "...", verified: true, sensitive: true}
+answers: {}
+#  short_bio:   {value: "...", verified: true}
+#  why_ai:      {value: "...", verified: true}
+documents: {}
+#  resume: {path: "documents/resume.pdf", verified: true}
+
+# Relevance scoring (not used as application facts).
+interests: [ai, machine learning, agents, llm, software engineering, hackathon, startup, research, open source]
+preferred_types: [hackathon, fellowship, internship, grant, competition, scholarship, conference]
+preferred_locations: [india, bengaluru, bangalore, remote, online, global]
+exclude_keywords: [phd only, postdoc, senior, 10+ years]

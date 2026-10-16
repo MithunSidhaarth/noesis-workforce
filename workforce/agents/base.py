@@ -123,10 +123,11 @@ class AgentContext:
                          response_type=MessageType.TASK_RESULT)
 
     def enqueue_self(self, kind: str, payload: dict, idempotency_key: str | None = None, **kw) -> tuple[str, bool]:
+        corr = kw.pop("correlation_id", None) or self._corr()
         return self.queue.enqueue(TaskSpec(
             bot_id=self.bot.id, kind=kind, payload=payload, idempotency_key=idempotency_key,
             workflow_id=self.task.workflow_id if self.task else None, parent_task_id=self.task.id if self.task else None,
-            correlation_id=self._corr(), requested_by=self.bot.id,
+            correlation_id=corr, requested_by=self.bot.id,
             delegation_depth=self.task.delegation_depth if self.task else 0, **kw))
 
     # ---- external actions -----------------------------------------------
