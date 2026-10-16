@@ -205,6 +205,8 @@ class ContentStudio(Agent):
                       params={"platform": item["platform"], "chars": len(item["body"] or "")}, attributes=attrs,
                       summary=f"Publish {item['platform']} {item['format']}: {item['title'][:80]}")
         if res.status == "succeeded":
+            from ..core.state import set_integration_status
+            set_integration_status(ctx.db, item["platform"], "ok", "last publish succeeded")
             set_state(ctx, item["id"], "PUBLISHED", res.evidence or "", published_at=now(),
                       platform_id=(res.result or {}).get("platform_id"), publication_url=(res.result or {}).get("url"))
         elif res.status == "dry_run":

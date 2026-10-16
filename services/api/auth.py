@@ -20,12 +20,13 @@ SESSION_TTL = 7 * 86400
 def hash_password(password: str, iterations: int = 390_000) -> str:
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
-    return f"pbkdf2_sha256${iterations}${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
+    # ':' separators (not '$') so the value survives docker compose's .env interpolation unquoted
+    return f"pbkdf2_sha256:{iterations}:{base64.b64encode(salt).decode()}:{base64.b64encode(dk).decode()}"
 
 
 def verify_password(password: str, stored: str) -> bool:
     try:
-        algo, it, salt, dk = stored.split("$")
+        algo, it, salt, dk = stored.replace("$", ":").split(":")
         if algo != "pbkdf2_sha256":
             return False
         got = hashlib.pbkdf2_hmac("sha256", password.encode(), base64.b64decode(salt), int(it))

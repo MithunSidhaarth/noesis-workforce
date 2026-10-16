@@ -1,0 +1,12 @@
+{$NOESIS_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	# Server-sent events must not be buffered.
+	reverse_proxy /api/events api:8000 {
+		flush_interval -1
+	}
+	reverse_proxy api:8000
+}

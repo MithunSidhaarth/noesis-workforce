@@ -149,8 +149,12 @@ class AgentContext:
             return None
         if "telegram.notify_owner" not in self.bot.tools:
             return None
-        return self.act("telegram.notify_owner", f"tg:{sha(key)[:24]}", lambda r: tg.send_owner(r.params["text"]),
-                        target="owner", params={"text": text}, summary=text[:120], wait_on_approval=False)
+        res = self.act("telegram.notify_owner", f"tg:{sha(key)[:24]}", lambda r: tg.send_owner(r.params["text"]),
+                       target="owner", params={"text": text}, summary=text[:120], wait_on_approval=False)
+        if res.status == "succeeded":
+            from ..core.state import set_integration_status
+            set_integration_status(self.db, "telegram", "ok", "last send succeeded")
+        return res
 
 
 class Agent:

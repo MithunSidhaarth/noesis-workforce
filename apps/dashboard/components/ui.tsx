@@ -17,7 +17,7 @@ const STATUS_TONE: Record<string, keyof typeof TONES> = {
   blocked: "red",
   running: "blue", busy: "blue", queued: "blue", delivered: "blue", SCHEDULED: "blue", dry_run: "violet",
   waiting_approval: "amber", needs_review: "amber", pending: "amber", paused: "amber", approval_required: "amber",
-  READY_TO_SUBMIT: "amber", needs_info: "amber", warning: "amber", not_configured: "gray", offline: "gray",
+  READY_TO_SUBMIT: "amber", needs_info: "amber", warning: "amber", not_configured: "gray", configured: "blue", offline: "gray",
 };
 
 export function Badge({ children, tone }: { children: ReactNode; tone?: keyof typeof TONES }) {

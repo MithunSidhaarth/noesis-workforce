@@ -1,0 +1,118 @@
+# NOESIS Workforce — single-VPS deployment.
+#   docker compose up -d --build                 # core: api, worker, scheduler, telegram, caddy
+#   docker compose --profile fast up -d          # + Redis for instant wake-ups (optional)
+#   docker compose --profile vault up -d         # + Syncthing to sync your Obsidian vault (optional)
+# Only Caddy publishes ports. Everything else is on the private `noesis` network.
+
+x-app: &app
+  build: .
+  image: noesis-workforce:latest
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - ./data:/data
+    - ./vault:/vault
+    - ./config/profile.yaml:/app/config/profile.yaml:ro
+    - ./prompts/content:/app/prompts/content:ro
+  networks: [noesis]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true
+  tmpfs: [/tmp]
+
+services:
+  api:
+    <<: *app
+    command: ["python", "-m", "uvicorn", "services.api.app:app", "--host", "0.0.0.0", "--port", "8000",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources: { limits: { memory: 256M, cpus: "0.5" } }
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "services.worker.main"]
+    depends_on: { api: { condition: service_healthy } }
+    stop_grace_period: 75s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3,time,sys; c=sqlite3.connect('/data/noesis.db'); r=c.execute('select max(last_heartbeat) from bots where enabled=1').fetchone()[0]; sys.exit(0 if r and time.time()-r<180 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources: { limits: { memory: 768M, cpus: "1.0" } }
+
+  scheduler:
+    <<: *app
+    command: ["python", "-m", "services.scheduler.main"]
+    depends_on: { api: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3,time,sys; c=sqlite3.connect('/data/noesis.db'); r=c.execute(\"select value from system_state where key='scheduler_heartbeat'\").fetchone(); sys.exit(0 if r and time.time()-float(r[0])<90 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources: { limits: { memory: 128M, cpus: "0.25" } }
+
+  telegram:
+    <<: *app
+    command: ["python", "-m", "services.telegram.bot"]
+    depends_on: { api: { condition: service_healthy } }
+    deploy:
+      resources: { limits: { memory: 128M, cpus: "0.25" } }
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      NOESIS_DOMAIN: ${NOESIS_DOMAIN:?set NOESIS_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: { api: { condition: service_healthy } }
+    networks: [noesis]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  redis:
+    profiles: [fast]
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    networks: [noesis]
+    deploy:
+      resources: { limits: { memory: 64M } }
+
+  syncthing:
+    profiles: [vault]
+    image: syncthing/syncthing:1.30
+    restart: unless-stopped
+    hostname: noesis-vps
+    environment: { PUID: "10001", PGID: "10001" }
+    volumes:
+      - ./vault:/var/syncthing/vault
+      - ./data/syncthing:/var/syncthing/config
+    # Sync protocol only. The admin GUI is NOT published; reach it through an SSH tunnel:
+    #   ssh -L 8384:127.0.0.1:8384 you@vps  then  docker compose exec syncthing ... (see docs/DEPLOYMENT.md)
+    ports: ["22000:22000/tcp", "22000:22000/udp", "127.0.0.1:8384:8384"]
+    networks: [noesis]
+
+networks:
+  noesis: {}
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}

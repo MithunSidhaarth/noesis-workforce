@@ -482,7 +482,7 @@ DASH = Path(os.environ.get("NOESIS_DASHBOARD_DIR", ROOT / "apps" / "dashboard" /
 if DASH.is_dir():
     app.mount("/_next", StaticFiles(directory=DASH / "_next"), name="next")
 
-    @app.get("/{path:path}", include_in_schema=False)
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def spa(path: str):
         if path.startswith("api/"):
             raise HTTPException(404)

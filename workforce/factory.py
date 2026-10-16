@@ -13,6 +13,15 @@ from .policies.engine import Policies
 from .runtime import Services
 
 
+def _configured(db: Database, name: str, detail: str) -> None:
+    """Credentials are present but no live call has succeeded yet. Never report
+    "ok" here: only a successful real call (Telegram poll, Gmail list, publish)
+    marks an integration ok."""
+    cur = db.one("SELECT status FROM integrations WHERE name=?", (name,))
+    if not cur or cur["status"] in ("not_configured", "configured", "revoked"):
+        set_integration_status(db, name, "configured", detail)
+
+
 def build_services(db: Database | None = None) -> Services:
     db = db or get_db()
     s = get_settings()
@@ -24,7 +33,7 @@ def build_services(db: Database | None = None) -> Services:
     if s.telegram_token and s.telegram_owner_id:
         from integrations.telegram.client import TelegramClient
         extra["telegram"] = TelegramClient(s.telegram_token, s.telegram_owner_id)
-        set_integration_status(db, "telegram", "ok", "configured (verified on first send)")
+        _configured(db, "telegram", "credentials set; not yet verified by a live call")
     else:
         set_integration_status(db, "telegram", "not_configured", "TELEGRAM_BOT_TOKEN / TELEGRAM_OWNER_ID missing")
 
@@ -43,15 +52,18 @@ def build_services(db: Database | None = None) -> Services:
     if auth.configured():
         extra["mailbox"] = GmailClient(auth)
         extra["calendar"] = CalendarClient(auth)
-        set_integration_status(db, "gmail", "ok", "configured (read + draft scopes)")
+        _configured(db, "gmail", "credentials set; not yet verified by a live call")
     else:
         set_integration_status(db, "gmail", "not_configured", "Google OAuth not set up")
 
     from integrations.social.publishers import InstagramPublisher, LinkedInPublisher
     li, ig = LinkedInPublisher(), InstagramPublisher()
     extra["publishers"] = {"linkedin": li, "instagram": ig}
-    set_integration_status(db, "linkedin", "ok" if li.configured() else "not_configured", "")
-    set_integration_status(db, "instagram", "ok" if ig.configured() else "not_configured", "")
+    for name, pub in (("linkedin", li), ("instagram", ig)):
+        if pub.configured():
+            _configured(db, name, "credentials set; publishing disabled by policy until you enable it")
+        else:
+            set_integration_status(db, name, "not_configured", "")
 
     pol = Policies()
     extra["policies_outreach"] = pol.get("outreach")

@@ -75,7 +75,9 @@ class OpportunityScout(Agent):
                             t + min(src["interval_s"] * (2 ** min(fails, 4)), 7 * 86400), src["id"]))
             if fails == 3:
                 ctx.notify_owner(f"⚠️ Source '{src['name']}' has failed 3 times in a row: {str(e)[:200]}", key=f"srcfail:{src['id']}:{int(t // 86400)}")
-            raise
+            # The source's own backoff (next_check) is the retry mechanism; retrying the task
+            # immediately would hammer the host and count one outage as several failures.
+            raise PermanentError(f"source fetch failed (next attempt per source backoff): {e}") from e
 
         new_ids = []
         limit = ctx.bot.settings.get("max_items_per_source", 50)

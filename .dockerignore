@@ -1,0 +1,15 @@
+.git
+**/__pycache__
+**/*.pyc
+.pytest_cache
+data
+backups
+vault
+secrets
+.env
+.env.*
+apps/dashboard/node_modules
+apps/dashboard/.next
+apps/dashboard/out
+tests
+docs

@@ -128,5 +128,14 @@ def test_source_failure_is_tracked(scout_env):
     BotRuntime("opportunity_scout", services, "it").step()
     s = env.db.one("SELECT * FROM sources WHERE id='fixture_feed'")
     assert s["consecutive_failures"] == 1 and s["reliability"] == "degraded" and s["last_error"]
+    assert s["next_check"] > s["last_checked"]  # source-level backoff schedules the retry
     t = env.db.one("SELECT * FROM tasks WHERE kind='check_source'")
-    assert t["status"] == "failed"  # visible, will retry with backoff
+    assert t["status"] == "dead" and t["attempts"] == 1  # no immediate re-fetch hammering the host
+    # three consecutive failed checks alert the owner exactly once
+    for i in range(2):
+        env.db.execute("UPDATE sources SET next_check=?", (i + 1,))  # each due slot is a distinct check
+        services.queue.enqueue(TaskSpec(bot_id="opportunity_scout", kind="sweep_sources", payload={}))
+        BotRuntime("opportunity_scout", services, "it").step()
+        BotRuntime("opportunity_scout", services, "it").step()
+    assert env.db.scalar("SELECT consecutive_failures FROM sources WHERE id='fixture_feed'") == 3
+    assert sum("failed 3 times" in m for m in services.extra["telegram"].sent) == 1
