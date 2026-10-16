@@ -5,20 +5,24 @@ straight into your real Obsidian vault, so you don't need Syncthing, a domain
 or a server. The catch is that it only works while the PC is on and awake.
 Anything that came due while the PC was asleep runs once when it wakes up.
 
-What was tested: the same containers on Linux, with the vault mounted from a
+What was tested: the setup below ran on this PC on 2026-10-16 (doctor: 0
+problems, all ten bots alive). Before that, the same containers on Linux, with the vault mounted from a
 path that has spaces in it, like yours. The vault was writable, and the
 vault's `.system` folder was invisible inside every container. Docker Desktop
-on Windows itself was **not** tested; that first run is yours.
+on Windows was then confirmed by that run.
 
 ## 1. Install Docker Desktop and Ubuntu (one time, about 15 minutes)
 
 1. In PowerShell **as Administrator**: `wsl --install -d Ubuntu`, then restart
-   the PC. Ubuntu opens and asks for a Linux username and password.
+   the PC. Ubuntu opens and asks for a Linux username and password. The distro
+   may be named with its version (e.g. `Ubuntu-26.04`; check `wsl -l -v`). If it
+   won't start, restart Windows; if it still fails, `wsl --unregister <name>`
+   and install it again.
 2. Install **Docker Desktop for Windows** from docker.com and keep *Use WSL 2*
    ticked.
 3. In Docker Desktop *Settings*:
    - *General*: tick **Start Docker Desktop when you sign in**.
-   - *Resources → WSL integration*: turn on **Ubuntu**.
+   - *Resources → WSL integration*: turn on your Ubuntu distro, then *Apply & restart*.
 4. In Windows *Settings → System → Power*: set sleep *when plugged in* to
    **Never**. The bots stop whenever the PC sleeps.
 
@@ -28,11 +32,11 @@ Keep the code and database inside Ubuntu, not on `C:`. SQLite is unreliable
 and slow on Windows folders shared into Docker.
 
 ```bash
-sudo apt update && sudo apt -y install git gh
-gh auth login                       # GitHub.com → HTTPS → log in with a browser
-gh repo clone MithunSidhaarth/noesis-workforce ~/noesis-workforce
+# Reuse the GitHub sign-in from Windows (Git Credential Manager); a sign-in window may pop up
+git config --global credential.helper "/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe"
+git clone https://github.com/MithunSidhaarth/noesis-workforce.git ~/noesis-workforce
 cd ~/noesis-workforce
-mkdir -p data && sudo chown -R 10001:10001 data
+mkdir -p data && docker run --rm -v "$PWD/data:/d" alpine chown -R 10001:10001 /d   # no sudo needed
 cp config/profile.example.yaml config/profile.yaml
 cp prompts/content/guidelines.md.example prompts/content/guidelines.md
 cp .env.example .env && chmod 600 .env
