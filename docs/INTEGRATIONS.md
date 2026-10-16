@@ -24,6 +24,13 @@ service from the build environment, whose network blocks them.
 
 1. **Telegram.** Follow DEPLOYMENT.md §8. Confirm `noesisctl.py test-telegram`
    delivers a message and `/status` answers. The dashboard should then show *ok*.
+   Then check the parts that only a real client can prove: run
+   `noesisctl.py run orchestrator morning_brief` and confirm the brief arrives;
+   send `/opportunities` and tap a *Prepare* or *Not for me* button on a card;
+   approve something from `/inbox` with its button. Quiet hours
+   (`NOESIS_QUIET_HOURS`, default 23:00–07:30) and the daily ping cap
+   (`NOESIS_MAX_PINGS_PER_DAY`, default 8) hold non-urgent messages for the
+   08:00 brief, so a silent phone at night is expected.
 2. **Vault.** Follow DEPLOYMENT.md §9. Confirm a new note appears under
    `09 Opportunities/` on your computer after the first verified opportunity,
    and that `99 System/Workforce/changelog.md` lists it.
@@ -32,7 +39,10 @@ service from the build environment, whose network blocks them.
    false`) or replace it. Add official sources you care about (college notice
    boards, company career RSS) using the same format.
 4. **Profile.** Fill `config/profile.yaml` with facts you have checked and mark
-   them `verified: true`. The Applications Agent uses nothing else.
+   them `verified: true`, or send `/profile set <key> <value>` on Telegram
+   (facts you type count as verified; sensitive ones are masked in replies and
+   never written to the audit log). `/missing` shows what drafts are waiting on.
+   The Applications Agent uses nothing else.
 5. **Content guidelines.** Put your real creative rules and reel instructions
    in `prompts/content/guidelines.md`. Until you do, the Content Studio uses only
    neutral templates; none of your guidelines were invented.
@@ -60,7 +70,7 @@ service from the build environment, whose network blocks them.
 9. **Instagram (optional).** Requires a Business or Creator account linked to a
    Facebook Page and a Meta app with `instagram_content_publish`. Text-only
    posting does not exist on Instagram; reels need a public HTTPS URL for the
-   video, and no media host is built yet (see ROADMAP).
+   video, and no media host is built yet (see [ROADMAP](ROADMAP.md)).
 10. **Turn things on gradually.** Keep dry-run on for a few days and read the
     *External actions* tab in Logs. Then turn dry-run off. Email sending,
     outreach sending and calendar writes stay off until you flip them in
