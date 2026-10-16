@@ -12,6 +12,9 @@ reports healthy, HTTPS is served by Caddy (internal certificate on
 backup → wipe → restore returns the data. Not verified: a real domain with a
 Let's Encrypt certificate, Syncthing, and the Redis profile.
 
+Using Oracle Cloud's free ARM machine without a domain? Read
+[ORACLE.md](ORACLE.md) first; it says which steps below change.
+
 ## 1. Prepare the VPS
 
 ```bash

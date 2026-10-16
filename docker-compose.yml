@@ -2,6 +2,7 @@
 #   docker compose up -d --build                 # core: api, worker, scheduler, telegram, caddy
 #   docker compose --profile fast up -d          # + Redis for instant wake-ups (optional)
 #   docker compose --profile vault up -d         # + Syncthing to sync your Obsidian vault (optional)
+# Private mode (no domain, dashboard over Tailscale only): see docker-compose.private.yml.
 # Only Caddy publishes ports. Everything else is on the private `noesis` network.
 
 x-app: &app
@@ -88,7 +89,7 @@ services:
     restart: unless-stopped
     ports: ["80:80", "443:443", "443:443/udp"]
     environment:
-      NOESIS_DOMAIN: ${NOESIS_DOMAIN:?set NOESIS_DOMAIN in .env}
+      NOESIS_DOMAIN: ${NOESIS_DOMAIN:-}   # checked by `noesisctl.py doctor`; unused in private mode
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

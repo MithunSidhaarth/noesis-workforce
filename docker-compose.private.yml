@@ -1,0 +1,10 @@
+# Private mode: no domain, no public ports. The dashboard is reachable only from
+# your own devices over Tailscale (`tailscale serve` on the host gives it HTTPS).
+# Enable it by adding this line to .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.private.yml
+# Telegram, sources and providers keep working: they are outbound connections.
+services:
+  caddy:
+    profiles: [public]          # not started in private mode
+  api:
+    ports: ["127.0.0.1:8000:8000"]   # loopback only; tailscale serve forwards to it

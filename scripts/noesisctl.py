@@ -124,6 +124,12 @@ def doctor(db) -> int:
           "NOESIS_SESSION_SECRET missing or shorter than 32 chars")
     check(os.environ.get("NOESIS_ADMIN_PASSWORD_HASH", "").startswith("pbkdf2_sha256"), "dashboard password hash set",
           "NOESIS_ADMIN_PASSWORD_HASH missing: run scripts/hash_password.py")
+    if "docker-compose.private.yml" in os.environ.get("COMPOSE_FILE", ""):
+        ok.append("private mode: dashboard only over Tailscale, no public ports")
+    else:
+        dom = os.environ.get("NOESIS_DOMAIN", "")
+        check(bool(dom) and not dom.endswith("example.com"), f"domain {dom}",
+              "NOESIS_DOMAIN not set: set your domain, or use private mode (docs/ORACLE.md)")
     if s.telegram_token:
         check(s.telegram_owner_id.isdigit(), "Telegram owner id is numeric",
               "TELEGRAM_OWNER_ID must be your numeric Telegram user id (ask @userinfobot)")

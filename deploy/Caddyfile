@@ -1,4 +1,4 @@
-{$NOESIS_DOMAIN} {
+{$NOESIS_DOMAIN:set-NOESIS_DOMAIN-in-env.invalid} {
 	encode zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

@@ -37,7 +37,8 @@ python -m services.worker.main --shared &  # all bots in one process
 python -m uvicorn services.api.app:app --port 8000   # API (+ dashboard once built: cd apps/dashboard && npm ci && npm run build)
 ```
 
-For the real server, follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (12 steps).
+For the real server, follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (12 steps), or
+**[docs/ORACLE.md](docs/ORACLE.md)** for the free Oracle Cloud option with no domain.
 
 ## Using it day to day
 
@@ -57,6 +58,7 @@ For the real server, follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (12 ste
 |---|---|
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | components, how work flows, design decisions |
 | [DEPLOYMENT](docs/DEPLOYMENT.md) | VPS setup from a clean machine, update, rollback |
+| [ORACLE](docs/ORACLE.md) | €0 option: Oracle Cloud Always Free ARM machine, private mode over Tailscale |
 | [CONFIGURATION](docs/CONFIGURATION.md) | every env var, policy and bot setting |
 | [INTEGRATIONS](docs/INTEGRATIONS.md) | integration checklist and what is live-tested |
 | [SECURITY](docs/SECURITY.md) | threat model, controls, recovery runbook |

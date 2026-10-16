@@ -7,12 +7,12 @@ current price page before you buy anything.
 
 | Item | Low-cost option | Notes |
 |---|---|---|
-| VPS | ~€4–6 (2 vCPU, 4 GB RAM, e.g. Hetzner CX22 class) | Measured on the build machine: worker ≈380 MB with one process per bot. `NOESIS_WORKER_MODE=shared` uses less. 2 GB RAM is the minimum; 4 GB leaves room for FFmpeg renders. 1 GB plans are too small. |
-| Domain | €0–1 (≈€10/year), or free with a DuckDNS-style subdomain | Needed for the Let's Encrypt certificate Caddy obtains. |
+| Server | €0 on Oracle Cloud Always Free (ARM, see [ORACLE](ORACLE.md)), or ~€4–6 for a VPS (2 vCPU, 4 GB RAM, e.g. Hetzner CX22 class) | Measured on the build machine: worker ≈380 MB with one process per bot. `NOESIS_WORKER_MODE=shared` uses less. 2 GB RAM is the minimum; 4 GB leaves room for FFmpeg renders. 1 GB plans are too small. |
+| Domain | €0 in private mode (Tailscale), else ≈€10/year or a free DuckDNS-style subdomain | Only public mode needs one, for Caddy's Let's Encrypt certificate. |
 | Backups off-server | €0 (copy to your PC) to ~€1 (object storage) | `scripts/backup.py` keeps 14 nightly archives locally. |
 | Telegram, Syncthing, Obsidian, Gmail/Calendar API (personal use) | €0 | Google APIs are free at this volume. |
 | LinkedIn / Instagram APIs | €0 | Needs developer apps; publishing is off by default. |
-| **Infrastructure total** | **≈€5–8 / month** | |
+| **Infrastructure total** | **€0 on Oracle Always Free, ≈€5–8 / month on a VPS** | |
 
 ## Models (monthly)
 
@@ -39,6 +39,8 @@ budgets, so update them if the provider's prices change.
 
 ## Recommended starting point
 
-VPS with 4 GB RAM, a free subdomain, Gemini free tier only:
-**about €5 a month**. Add an Anthropic key later with the $0.50/day cap if the
-free-tier quality is not enough.
+Oracle Always Free in private mode with the Gemini free tier: **€0 a month**
+(the account must be upgraded to Pay As You Go to avoid idle reclamation; set
+the $1 budget alert). If Oracle has no capacity: a 4 GB VPS, about €5 a month.
+Add an Anthropic key later with the $0.50/day cap if the free-tier quality is
+not enough.

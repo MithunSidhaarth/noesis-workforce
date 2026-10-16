@@ -6,8 +6,10 @@ each one has a check so you know it worked. Details are in
 
 ## Required
 
-1. **Rent a VPS** (Ubuntu 24.04, 4 GB RAM recommended) and point a domain or
-   subdomain's A record at it. *Check:* `ping your.domain` resolves to the VPS.
+1. **Get a server.** Either the free Oracle Cloud ARM machine in private mode
+   (no domain needed, follow [ORACLE](ORACLE.md)), or rent a VPS (Ubuntu 24.04,
+   4 GB RAM recommended) and point a domain's A record at it.
+   *Check:* you can SSH in.
 2. **Clone the private repo on the VPS** (deploy key or a fine-grained token
    with read access to this one repo).
 3. **Create `.env`** from `.env.example`. Generate the dashboard password hash
