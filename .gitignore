@@ -15,3 +15,4 @@ secrets/
 config/profile.yaml
 backups/
 *.log
+.previous-commit
