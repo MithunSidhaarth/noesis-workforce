@@ -59,6 +59,13 @@ prove that a real provider accepts the call.
 - The smoke test found false "bot offline" alerts right after startup; fixed
   with a startup grace period and covered by `test_offline_alert_only_for_a_bot_that_died_after_startup`.
 
+- ARM64 (Oracle Ampere A1 target): the image was built for `linux/arm64` under
+  emulation; the suite ran inside it with 81 passed and 1 skipped (the reel
+  test, because that build had no ffmpeg). The API and dashboard started.
+- Private mode (`docker-compose.private.yml`): the stack ran with no Caddy; the
+  API was bound to 127.0.0.1 only and unreachable from outside; `doctor`
+  reported private mode with 0 problems.
+
 ## Not tested live (network blocked from the build environment)
 
 Telegram (messages and buttons), Gmail, Google Calendar, LinkedIn, Instagram,

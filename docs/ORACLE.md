@@ -10,7 +10,12 @@ current Always Free page when you sign up.
 
 ## What was tested
 
-- ARM64 build: being verified under emulation (this line is updated with the result).
+- The image **builds and runs on ARM64**. It was built for `linux/arm64` under
+  emulation. Inside it, 81 of 82 tests passed; the reel-rendering test was
+  skipped because that build had no ffmpeg. The API and dashboard also started
+  and answered. That build skipped the Debian packages (ffmpeg, tini) because
+  the build environment can't reach Debian's mirrors. Both packages exist for
+  ARM64 in Debian, so the real build on the server installs them.
 - Private mode was started with Docker Compose. The API answered only on
   `127.0.0.1:8000` and no public port was open.
 - Oracle itself, Tailscale and a real A1 machine were **not** tested. That
