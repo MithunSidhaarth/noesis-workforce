@@ -121,7 +121,9 @@ class OutreachAgent(Agent):
         stats = {r["status"]: r["n"] for r in ctx.db.all("SELECT status, COUNT(*) n FROM contacts GROUP BY status")}
         sent = ctx.db.scalar("SELECT COUNT(*) FROM outreach_messages WHERE status='sent' AND sent_at>=?", (week,))
         drafts = ctx.db.scalar("SELECT COUNT(*) FROM outreach_messages WHERE status='draft'")
-        text = f"📈 Outreach this week: {sent} sent, {drafts} drafts waiting. Pipeline: " + ", ".join(f"{k} {v}" for k, v in stats.items())
+        text = (f"📈 Outreach this week\n\n{sent} message{'s' if sent != 1 else ''} sent, "
+                f"{drafts} draft{'s' if drafts != 1 else ''} waiting for review.\n"
+                "Contacts: " + (", ".join(f"{v} {k.replace('_', ' ')}" for k, v in stats.items()) or "none yet") + ".")
         ctx.notify_owner(text, key=f"outreach-week:{int(now() // (7 * 86400))}")
         return {"sent": sent, "drafts": drafts, "pipeline": stats}
 

@@ -25,6 +25,7 @@ COPY scripts/ scripts/
 COPY config/ config/
 COPY policies/ policies/
 COPY prompts/ prompts/
+COPY assets/ assets/
 COPY pyproject.toml ./
 COPY --from=dashboard /dash/out apps/dashboard/out
 ENV PYTHONUNBUFFERED=1 \

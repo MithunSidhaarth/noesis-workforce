@@ -10,6 +10,10 @@
   dry-run on|off                 global dry-run switch
   enable BOT | disable BOT
   test-telegram                  send a real test message to TELEGRAM_OWNER_ID
+  test-ntfy                      push a real test notification to NTFY_TOPIC
+  reels FOLDER [--brand B] [--every-hours 3] [--window 09:00-23:00]
+                                 queue finished reels from FOLDER/manifest.yaml, one per slot
+  reels list                     reels waiting for their slot
   doctor                         check configuration and health; prints what to fix
   confirm REF [URL] | skip REF [REASON] | outcome REF accepted|rejected|no_response
   profile-set KEY VALUE          add a verified fact (same as Telegram /profile set)
@@ -101,6 +105,31 @@ def main(argv: list[str]) -> int:
         except (oa.OwnerActionError, IndexError) as e:
             print(f"error: {e or 'missing argument'}")
             return 1
+    elif cmd == "reels":
+        from workforce import reels as rl
+        if not args or args[0] == "list":
+            items = rl.upcoming(db)
+            print("\n".join(f"{iso(r['at'])}  {r['title'] or '(untitled)'}  [{r['status']}]" for r in items) or "No reels waiting.")
+            return 0
+        opt = {k: args[args.index(k) + 1] for k in ("--brand", "--every-hours", "--window") if k in args}
+        try:
+            out = rl.queue_reels(db, args[0], by="cli", brand=opt.get("--brand"), every_hours=float(opt.get("--every-hours", 3)),
+                                 window=opt.get("--window", "09:00-23:00"))
+        except (rl.ReelQueueError, ValueError) as e:
+            print(f"error: {e}")
+            return 1
+        for r in out:
+            print(f"{iso(r['at'])}  {r['title']}" + ("" if r["new"] else "  (already queued)"))
+        print(f"{len(out)} reel(s) queued. Each goes through QC and the publishing policy at its time; "
+              f"with dry-run on, nothing is posted.")
+        return 0
+    elif cmd == "test-ntfy":
+        from integrations.ntfy.client import NtfyClient
+        push = NtfyClient.from_env()
+        if push is None:
+            print("ntfy is not configured (set NTFY_TOPIC in .env).")
+            return 1
+        print(push.push("✅ NOESIS can reach your phone\n\nThis is a test push from noesisctl.")["evidence"])
     elif cmd == "prune":
         from workforce.scheduler import prune
         print(prune(db))

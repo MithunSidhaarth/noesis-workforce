@@ -3,17 +3,18 @@
 # post per brand per channel below, written in that brand's voice.
 # Channel ids: connect the account on zernio.com (free for 2 accounts) and copy its
 # account id into zernio_account (scripts/zernio_accounts.py lists them). API keys go in .env, never here.
+# Posting stays off until publishing is enabled in policies/publishing.yaml and dry-run is turned off.
 brands:
   - id: msthinks
     name: msthinks
     handle: "@msthinks"
-    about: "Mithun's personal brand on Instagram: an AI/ML student at BMSCE building AI and full-stack products, and Cue, a Windows notch app"
-    audience: "students and young builders curious about AI and tech"
-    voice: "short, visual, one idea per reel; hook under 8 words; curious and plain-spoken"
+    about: "A personal space for ideas, thoughts, and creative explorations at the intersection of technology and philosophy. Run by Mithun, an AI/ML student at BMSCE who builds AI and full-stack products."
+    audience: "students and young builders who like thinking about technology, not just using it"
+    voice: "short, visual, one idea per reel; hook under 8 words; curious, reflective and plain-spoken; asks a real question"
     link: "https://mithunsidhaarth.in"
     topics: []
     channels:
-      instagram: {zernio_account: "", postiz_integration: ""}
+      instagram: {zernio_account: "6ad22f69280aa6cf7d25355e", postiz_integration: ""}
   - id: mithunsidhaarth
     name: Mithun Sidhaarth
     handle: "linkedin.com/in/mithunsidhaarth"
@@ -23,6 +24,18 @@ brands:
     link: "https://mithunsidhaarth.in"
     topics: []
     channels:
-      linkedin: {zernio_account: "", postiz_integration: ""}
-  # cue.notch (Instagram, for Cue at cue.mithunsidhaarth.in) can come back as a third
-  # brand when you connect it; Zernio's free plan covers two accounts.
+      linkedin: {zernio_account: "6ad22f8c280aa6cf7d2535eb", postiz_integration: ""}
+  # Cue posts go out on @msthinks with cue.notch invited as a collaborator, so they
+  # show on both profiles. Work that mentions Cue routes here for Instagram and
+  # still goes to your LinkedIn.
+  - id: cue
+    name: Cue
+    handle: "@cue.notch (collab on @msthinks)"
+    about: "Cue: a smart, context-aware productivity tool that turns your Windows notch area into a seamless, interactive workspace. Agent approvals, live builds, music, focus and file drop, with Tock the mascot. Site: cue.mithunsidhaarth.in (no public release yet; never say it is out or free)"
+    audience: "Windows users, developers who run AI coding agents, productivity nerds"
+    voice: "show the feature in the first second; one feature per reel; playful but precise; Tock can wink"
+    link: "https://cue.mithunsidhaarth.in"
+    topics: ["cue", "cue.notch", "tock", "notch"]
+    reels: {every_hours: 3, window: "09:00-23:00", keep_queued: 2}   # NOESIS makes new reels when fewer than 2 are waiting
+    channels:
+      instagram: {zernio_account: "6ad22f69280aa6cf7d25355e", postiz_integration: "", collaborators: ["cue.notch"]}

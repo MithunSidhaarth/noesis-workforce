@@ -101,11 +101,14 @@ inbox appears on the *Email* page. Sending stays off: replies are drafts until y
 switch on `allow_send` in `policies/email.yaml`. Email applications are separate
 (step 6).
 
-## 5. Posting accounts (cue.notch on LinkedIn, msthinks on Instagram)
+## 5. Posting accounts (msthinks on Instagram, your profile on LinkedIn)
 
-**You get:** every `/work <what you did>` and the Monday plan turns into a
-LinkedIn post for cue.notch and an Instagram reel for msthinks, each in its own
-voice, checked by the Quality bot, capped at 1 post a day per account.
+**You get:** every `/work <what you did>` and the Monday plan turns into an
+Instagram reel for @msthinks and a LinkedIn post on your profile, each in its own
+voice, checked by the Quality bot, capped at 1 post a day per account. Work that
+mentions Cue goes out as a Cue reel on @msthinks with cue.notch invited as a
+collaborator. A draft the writer model didn't write (the plain fallback template)
+never posts by itself: it waits for your OK.
 
 First, write one line each in `config/brands.yaml`: what the brand is about
 (`about`), who it's for (`audience`), and adjust `voice` if you like.
@@ -175,6 +178,37 @@ When the dry-run log looks right for a few days:
 3. **Dry-run off:** dashboard *Settings*, or
    `docker compose exec api python scripts/noesisctl.py dry-run off`.
    `/pause` on Telegram stops everything instantly.
+
+## 7. Phone notifications with ntfy (free)
+
+1. Install the **ntfy** app (Android / iOS) and subscribe to your topic (`methxd`).
+2. In `.env`: `NTFY_TOPIC=methxd`.
+3. Test: `docker compose exec api python scripts/noesisctl.py test-ntfy`.
+
+Every notification that goes to Telegram also pushes its headline to ntfy.
+Anyone who knows a topic name on ntfy.sh can read it, so only the headline is
+pushed (no email subjects or addresses); the details stay in Telegram.
+
+## 8. Cue reels (every 3 hours on @msthinks)
+
+**Your own reels:** put them in a folder with a `manifest.yaml` (see
+`workforce/reels.py` for the format; mark reels already on Instagram with
+`posted: true`), then:
+
+```bash
+docker compose run --rm -v /mnt/d/cue/reels:/reels:ro worker \
+  python scripts/noesisctl.py reels /reels --brand cue --every-hours 3
+docker compose exec api python scripts/noesisctl.py reels list
+```
+
+Reels post between 09:00 and 23:00, 3 hours apart.
+
+**New reels when yours run out:** every hour Content Studio checks the Cue
+queue. With fewer than 2 reels waiting it writes a script no reel has used
+(the starters in `assets/cue/scripts.yaml` first, then Gemini), renders it from
+real footage of Cue and Tock with the Motion kit's sound effects and fonts, and
+queues it for the next slot. Settings: `reels:` under the cue brand in
+`config/brands.yaml`.
 
 ## Your daily rhythm
 

@@ -39,6 +39,19 @@ def build_services(db: Database | None = None) -> Services:
     else:
         set_integration_status(db, "telegram", "not_configured", "TELEGRAM_BOT_TOKEN / TELEGRAM_OWNER_ID missing")
 
+    from integrations.ntfy.client import NtfyClient
+    from .policies.engine import IntegrationRevoked
+    try:
+        push = NtfyClient.from_env()
+    except IntegrationRevoked as e:
+        push = None
+        set_integration_status(db, "ntfy", "error", str(e))
+    if push is not None:
+        extra["ntfy"] = push
+        _configured(db, "ntfy", f"topic {push.topic} on {push.server}; not yet verified by a live push")
+    elif not os.environ.get("NTFY_TOPIC"):
+        set_integration_status(db, "ntfy", "not_configured", "NTFY_TOPIC not set in .env")
+
     if s.vault_path:
         from integrations.obsidian.vault import Vault, VaultError
         try:
@@ -75,7 +88,8 @@ def build_services(db: Database | None = None) -> Services:
     for b in load_brands():
         for platform, ch in b["channels"].items():
             if ch.get("zernio_account"):
-                extra["publishers"][f"{platform}:{b['id']}"] = ZernioPublisher(str(ch["zernio_account"]), platform)
+                extra["publishers"][f"{platform}:{b['id']}"] = ZernioPublisher(str(ch["zernio_account"]), platform,
+                                                                                collaborators=ch.get("collaborators"))
                 zernio += 1
             elif ch.get("postiz_integration"):
                 extra["publishers"][f"{platform}:{b['id']}"] = PostizPublisher(str(ch["postiz_integration"]), platform)

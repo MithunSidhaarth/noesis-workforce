@@ -275,8 +275,10 @@ class ZernioPublisher:
     """
 
     def __init__(self, account_id: str, platform: str, api_key: str | None = None, base_url: str | None = None,
-                 transport=None):
+                 transport=None, collaborators: list[str] | None = None):
         self.zernio_account = account_id
+        # Instagram collab invites (up to 3 usernames); the invited account accepts in the app
+        self.collaborators = [str(c).lstrip("@") for c in (collaborators or []) if str(c).strip()][:3] if platform == "instagram" else []
         self.platform = platform
         self.name = f"zernio:{platform}"
         self.key = api_key if api_key is not None else os.environ.get("ZERNIO_API_KEY", "")
@@ -312,8 +314,10 @@ class ZernioPublisher:
         return d["publicUrl"]
 
     def _post(self, text: str, media_url: str | None) -> dict:
-        body: dict = {"content": text, "publishNow": True,
-                      "platforms": [{"platform": self.platform, "accountId": self.zernio_account}]}
+        target: dict = {"platform": self.platform, "accountId": self.zernio_account}
+        if self.collaborators and media_url:
+            target["platformSpecificData"] = {"collaborators": self.collaborators}
+        body: dict = {"content": text, "publishNow": True, "platforms": [target]}
         if media_url:
             body["mediaItems"] = [{"url": media_url, "type": "video"}]
         r = self.client.post(f"{self.base}/posts", headers={**self._h(), "x-request-id": "noesis-" + hashlib.sha256(f"{self.zernio_account}|{text}|{media_url}".encode()).hexdigest()[:32]},

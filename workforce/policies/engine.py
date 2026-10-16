@@ -136,9 +136,10 @@ class PolicyEngine:
         if deny:
             return PolicyDecision(decision=Decision.deny, reasons=deny, policy="publishing")
         per = req.target if p.get("caps_per_account") else None
-        if self._count_actions("social.publish", self._day_start(), target=per) >= p.get("max_posts_per_day", 1):
+        caps = {**p, **((p.get("account_caps") or {}).get(req.target) or {})} if per else p
+        if self._count_actions("social.publish", self._day_start(), target=per) >= caps.get("max_posts_per_day", 1):
             return self._cap("daily post cap reached", "publishing")
-        if self._count_actions("social.publish", now() - 7 * 86400, target=per) >= p.get("max_posts_per_week", 4):
+        if self._count_actions("social.publish", now() - 7 * 86400, target=per) >= caps.get("max_posts_per_week", 4):
             return self._cap("weekly post cap reached", "publishing", weekly=True)
         return PolicyDecision(decision=Decision.allow, reasons=reasons or ["publishing policy satisfied"], policy="publishing")
 

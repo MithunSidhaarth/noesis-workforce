@@ -164,19 +164,25 @@ class ApplicationsAgent(Agent):
         ctx.db.execute("UPDATE applications SET answers_json=?, missing_json=?, documents_json=?, submission_method=?, updated_at=? WHERE id=?",
                        (dumps(answers), dumps(missing), dumps(docs), method, now(), app["id"]))
         app = self._transition(ctx, app, "REVIEW", f"prepared; {len(missing)} missing item(s)")
-        from ..owner_actions import closes_in, ref, schedule_deadline_reminders
+        from ..core.state import SystemState
+        from ..owner_actions import clip, closes_in, missing_label, ref, schedule_deadline_reminders
         schedule_deadline_reminders(ctx.db, opp, ctx.bot.id)
         ctx.send(MessageType.RESEARCH_FINDING, {"application_id": app["id"], "opportunity_id": oid, "missing": missing},
                  topic="application.ready", dedupe_key=f"appready:{app['id']}")
-        elig = {"eligible": "you qualify on every stated criterion", "needs_info": "can't confirm yet",
+        elig = {"eligible": "you meet every stated criterion", "needs_info": "not confirmed yet, some details are missing",
                 "unknown": "not checked"}.get(status, status)
-        msg = (f"📝 Draft ready: {opp['title'][:90]}\n{closes_in(opp['deadline'])}\nEligibility: {elig}"
-               + (f"\nNeeds from you: {', '.join(missing[:8])} (see /missing)" if missing else "\nNothing missing.")
-               + ("\nYou submit it on the site, then send /submitted " + ref(app['id']) + " <confirmation>."
+        test = " Test mode is on, so it will only be rehearsed." if SystemState(ctx.db).dry_run else ""
+        msg = (f"📝 Application draft ready{' (needs your input)' if missing else ''}\n\n{clip(opp['title'], 120)}\n"
+               f"{closes_in(opp['deadline'])}\nEligibility: {elig}"
+               + (f"\nStill needed from you: {', '.join(missing_label(m) for m in missing[:8])}. Send /missing to see how to add them."
+                  if missing else "\nNothing is missing.")
+               + ("\n\nNext: submit it on the organiser's site, then send /submitted " + ref(app['id']) + " <confirmation>."
                   if method == "web_form" else
-                  "\nYou approved this one, so I'm sending it by email now if every answer is verified; otherwise I'll ask."
-                  if opp["confirmed_by"] and not missing else "\nSubmission: by email, after your approval.")
-               + f"\nRef {ref(app['id'])}")
+                  "\n\nNext: you confirmed this one, so I'll send it by email as soon as every answer checks out as verified; "
+                  "if anything doesn't, I'll ask you first." + test
+                  if opp["confirmed_by"] and not missing else
+                  "\n\nNext: it goes by email, and only after you approve it.")
+               + f"\nref {ref(app['id'])}")
         soon = bool(opp["deadline"]) and opp["deadline"] - now() < 72 * 3600
         ctx.notify_owner(msg, key=f"appprep:{app['id']}:{len(missing)}", urgent=soon)
         if method in ("email", "api") and opp["confirmed_by"] and not missing:
@@ -264,13 +270,14 @@ class ApplicationsAgent(Agent):
 
     def follow_up_sweep(self, ctx: AgentContext, task: Task) -> dict:
         """Submitted applications whose follow-up date passed: ask the owner how it went."""
-        from ..owner_actions import ref
+        from ..owner_actions import clip, ref
         due = ctx.db.all("SELECT a.*, o.title FROM applications a JOIN opportunities o ON o.id=a.opportunity_id "
                          "WHERE a.state='SUBMITTED' AND a.follow_up_at IS NOT NULL AND a.follow_up_at<=?", (now(),))
         for a in due:
             self._transition(ctx, a, "FOLLOW_UP", "follow-up date reached")
-            ctx.notify_owner(f"📬 Any news on “{a['title'][:80]}”? It was submitted two weeks ago.\n"
-                             f"Reply /outcome {ref(a['id'])} accepted | rejected | no_response", key=f"followup:{a['id']}")
+            ctx.notify_owner(f"📬 Any news on an application?\n\n“{clip(a['title'], 100)}” was submitted two weeks ago. "
+                             f"How did it go?\nReply /outcome {ref(a['id'])} accepted, rejected or no_response.",
+                             key=f"followup:{a['id']}")
         return {"follow_ups": len(due)}
 
 

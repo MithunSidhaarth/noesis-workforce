@@ -102,3 +102,18 @@ def render_reel(scenes: list[dict], out_path: Path, spec: str = "instagram_reel"
     shutil.rmtree(work, ignore_errors=True)
     return {"path": str(out_path), "subtitles": str(out_path.with_suffix(".srt")), **info,
             "validated": not problems, "problems": problems}
+
+
+def validate_file(path: Path, spec: str = "instagram_reel") -> dict:
+    """Check a finished video (made outside NOESIS) against the platform spec:
+    9:16 at least 720 wide, 3-90 s, H.264. Returns probe info plus problems."""
+    info = probe(Path(path))
+    problems = []
+    if spec == "instagram_reel":
+        if abs(info["width"] / info["height"] - 9 / 16) > 0.02 or info["width"] < 720:
+            problems.append(f"resolution {info['width']}x{info['height']} is not a 9:16 reel (1080x1920 recommended)")
+        if not 3 <= info["duration"] <= 90:
+            problems.append(f"duration {info['duration']:.1f}s outside 3-90s")
+        if info["codec"] != "h264":
+            problems.append(f"video codec {info['codec']} (Instagram wants H.264)")
+    return {**info, "validated": not problems, "problems": problems}

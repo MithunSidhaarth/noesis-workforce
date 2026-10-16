@@ -148,8 +148,9 @@ class AgentContext:
             # pause or a daily cap: the block clears by itself, so the task waits instead of finishing
             raise Deferred(f"{action} held: {'; '.join(res.reasons)}", max(60.0, res.retry_at - now()))
         if res.status == "unknown":
-            self.notify_owner(f"⚠️ {self.bot.name}: I can't tell whether \"{summary or action}\" went through "
-                              f"(the attempt was interrupted). Please check before I try again. Ref {res.id[-6:]}",
+            self.notify_owner(f"⚠️ Please check: did this go through?\n\n{self.bot.name} was interrupted while doing "
+                              f"\"{summary or action}\", so I can't tell whether it happened. I won't try again until you've "
+                              f"checked. ref {res.id[-6:]}",
                               key=f"unknown:{res.id}", urgent=True)
             raise PermanentError(f"{action} outcome unknown; owner asked to check")
         return res
@@ -161,30 +162,43 @@ class AgentContext:
         `force_now` is for messages that ARE the batch (brief, summaries) or
         direct replies the owner is waiting for."""
         from .. import notifications as nt
-        if "telegram.notify_owner" not in self.bot.tools:
+        if not {"telegram.notify_owner", "ntfy.notify_owner"} & set(self.bot.tools):
             return None
         row, created = nt.register(self.db, self.bot.id, key, text, urgent, buttons)
         if not created and row["status"] != "held":
             return None
         if not (force_now or nt.should_send_now(self.db, urgent)):
             return None
-        return self.deliver(row["id"], key, text, buttons)
+        return self.deliver(row["id"], key, text, buttons, urgent=urgent)
 
-    def deliver(self, nid: str, key: str, text: str, buttons: list | None) -> ExternalActionResult | None:
+    def deliver(self, nid: str, key: str, text: str, buttons: list | None, urgent: bool = False) -> ExternalActionResult | None:
+        """Send one stored notification to every channel the owner set up: Telegram
+        (full text and buttons) and ntfy (a push with the headline). It counts as
+        delivered when at least one channel took it."""
         from .. import notifications as nt
-        tg = self.services.get("telegram")
-        if tg is None:
-            self.log("telegram not configured; notification kept for the dashboard", level="debug", text=text[:200])
+        from ..core.state import set_integration_status
+        tg, push = self.services.get("telegram"), self.services.get("ntfy")
+        results = []
+        if tg is not None and "telegram.notify_owner" in self.bot.tools:
+            res = self.act("telegram.notify_owner", f"tg:{sha(key)[:24]}",
+                           lambda r: tg.send_owner(r.params["text"], buttons=r.params.get("buttons")),
+                           target="owner", params={"text": text, "buttons": buttons}, summary=text[:120], wait_on_approval=False)
+            if res.status == "succeeded":
+                set_integration_status(self.db, "telegram", "ok", "last send succeeded")
+            results.append(res)
+        if push is not None and "ntfy.notify_owner" in self.bot.tools:
+            res = self.act("ntfy.notify_owner", f"ntfy:{sha(key)[:24]}",
+                           lambda r: push.push(r.params["text"], urgent=r.params.get("urgent", False)),
+                           target="owner", params={"text": text, "urgent": urgent}, summary=text[:120], wait_on_approval=False)
+            if res.status == "succeeded":
+                set_integration_status(self.db, "ntfy", "ok", "last push succeeded")
+            results.append(res)
+        if not results:
+            self.log("no notification channel configured; kept for the dashboard", level="debug", text=text[:200])
             return None
-        res = self.act("telegram.notify_owner", f"tg:{sha(key)[:24]}",
-                       lambda r: tg.send_owner(r.params["text"], buttons=r.params.get("buttons")),
-                       target="owner", params={"text": text, "buttons": buttons}, summary=text[:120], wait_on_approval=False)
-        if res.status in ("succeeded", "dry_run", "duplicate"):
+        if any(r.status in ("succeeded", "dry_run", "duplicate") for r in results):
             nt.mark(self.db, nid, "sent")
-        if res.status == "succeeded":
-            from ..core.state import set_integration_status
-            set_integration_status(self.db, "telegram", "ok", "last send succeeded")
-        return res
+        return results[0]
 
 
 class Agent:

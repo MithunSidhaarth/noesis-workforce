@@ -133,7 +133,9 @@ class BotRuntime:
             set_integration_status(self.s.db, integ, "revoked", str(e))
             st = self.s.queue.fail(task.id, f"credential error: {e}", retryable=False, worker_id=self.worker_id)
             # one alert per integration per day, not one per failed task
-            self._alert(ctx, task, f"{integ} needs reconnecting: {e}", key=f"alert:cred:{integ}:{int(now() // 86400)}")
+            self._alert(ctx, task, f"{integ} needs reconnecting\n\n{integ} rejected its credentials ({e}). Tasks that need it "
+                        "will fail until you reconnect it. Check the dashboard Integrations page.",
+                        key=f"alert:cred:{integ}:{int(now() // 86400)}")
             self._reply_result(ctx, task, "failed", {"error": str(e)})
             return st
         except PermanentError as e:
@@ -143,7 +145,8 @@ class BotRuntime:
         except (IntegrationError, ModelUnavailable, MessageRejected, Exception) as e:  # noqa: BLE001
             st = self.s.queue.fail(task.id, f"{type(e).__name__}: {e}", retryable=True, worker_id=self.worker_id)
             if st == "dead":
-                self._alert(ctx, task, f"{task.kind} gave up after {task.attempts} attempts: {e}",
+                self._alert(ctx, task, f"{task.kind.replace('_', ' ')} failed\n\nI tried {task.attempts} times and stopped. "
+                            f"Last error: {str(e)[:200]}\nSee the dashboard Tasks page for details.",
                             key=f"alert:dead:{self.bot_id}:{task.kind}:{int(now() // 3600)}")
                 self._reply_result(ctx, task, "failed", {"error": str(e)})
             return st

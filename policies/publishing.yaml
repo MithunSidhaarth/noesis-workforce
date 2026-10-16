@@ -16,6 +16,10 @@ approval_categories:              # always need you
 max_posts_per_day: 1
 max_posts_per_week: 4
 caps_per_account: true            # the caps above apply to each account separately (cue.notch IG, cue.notch LinkedIn, ...)
+account_caps:                     # per-account overrides of the two caps above
+  "zernio:6ad22f69280aa6cf7d25355e":   # @msthinks Instagram: Cue reels go out every 3 hours
+    max_posts_per_day: 5
+    max_posts_per_week: 30
 require_media_validation: true
 require_duplicate_check: true
 require_license_check: true

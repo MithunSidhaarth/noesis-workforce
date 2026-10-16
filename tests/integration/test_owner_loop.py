@@ -103,8 +103,8 @@ def test_inbox_is_numbered_and_approve_by_number(env, services):
     say = lambda t: h.handle({"message": {"from": {"id": 111}, "chat": {"id": 111, "type": "private"}, "text": t}})  # noqa: E731
     assert say("/inbox").startswith("1. ")
     assert "Approved" in say("/approve 1")
-    assert "Nothing waiting" in say("/inbox")
-    assert "No item #3" in say("/approve 3")
+    assert "Nothing is waiting" in say("/inbox")
+    assert "no item #3" in say("/approve 3")
 
 
 # ---- confirm / skip / remind ----------------------------------------------------
@@ -203,7 +203,7 @@ def test_outcome_and_follow_up(env, services):
     drain(services, ["applications"])
     assert env.db.scalar("SELECT state FROM applications WHERE id=?", (app["id"],)) == "FOLLOW_UP"
     assert env.db.scalar("SELECT COUNT(*) FROM notifications WHERE key=?", (f"followup:{app['id']}",)) == 1
-    assert "Outcome must be" in say(f"/outcome {oa.ref(app['id'])} maybe")
+    assert "didn't recognise that outcome" in say(f"/outcome {oa.ref(app['id'])} maybe")
     assert "Congratulations" in say(f"/outcome {oa.ref(app['id'])} accepted")
     a = env.db.one("SELECT * FROM applications WHERE id=?", (app["id"],))
     assert a["state"] == "CLOSED" and a["outcome"] == "accepted"
@@ -219,7 +219,7 @@ def test_weekly_summary_funnel_and_suggestions(env, services):
     services.queue.enqueue(TaskSpec(bot_id="orchestrator", kind="weekly_summary"))
     drain(services, ["orchestrator"])
     text = services.extra["telegram"].sent[-1]
-    assert "Funnel: 3 found" in text and "paid program (3)" in text and "exclude_keywords" in text
+    assert "3 found →" in text and "paid program (3)" in text and "exclude_keywords" in text
     assert list((env.vault / "08 Reviews").glob("Workforce *-W*.md"))
 
 
@@ -233,7 +233,7 @@ def test_daily_summary_shows_health_only_when_broken(env, services):
     env.db.execute("DELETE FROM external_actions")
     services.queue.enqueue(TaskSpec(bot_id="orchestrator", kind="daily_summary", idempotency_key="d2"))
     drain(services, ["orchestrator"])
-    assert "gmail is revoked" in services.extra["telegram"].sent[-1]
+    assert "gmail was disconnected" in services.extra["telegram"].sent[-1]
 
 
 # ---- housekeeping ---------------------------------------------------------------

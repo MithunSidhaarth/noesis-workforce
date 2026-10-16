@@ -5,7 +5,7 @@ Last updated: 2026-10-16. Branch `main`.
 ## Summary
 
 All ten bots, the runtime, dashboard, Telegram command centre, policies and
-deployment are implemented and pass 94 automated tests. The Docker stack builds
+deployment are implemented and pass 102 automated tests. The Docker stack builds
 and runs healthy. **No outside service has been called live yet**, so every
 integration is "implemented, tested with fakes, waiting for your first real run".
 
@@ -35,6 +35,18 @@ integration is "implemented, tested with fakes, waiting for your first real run"
   Zernio (free for 2 accounts), Postiz or the direct LinkedIn/Instagram APIs
   (LinkedIn video upload, Instagram reel upload without a public media host);
   post caps per account.
+- Cue reels: `config/brands.yaml` brand `cue` posts on @msthinks's Instagram
+  with cue.notch invited as a collaborator (Zernio `platformSpecificData.collaborators`,
+  per the Zernio docs; not yet seen working live). `noesisctl.py reels FOLDER`
+  queues finished reels 3 hours apart (09:00-23:00), skipping `posted: true`;
+  `refill_reels` (hourly) renders a new reel from an unused script (starter bank,
+  then the model) using recorded Cue/Tock footage, Motion-kit SFX and fonts.
+  @msthinks has its own caps (5/day, 30/week) in `account_caps`.
+- Template drafts (written without the model) carry the `template_draft` flag
+  and always need your approval, after two went out live on 16 Oct.
+- ntfy: every owner notification also pushes its headline to `NTFY_TOPIC`
+  (headline only on public ntfy.sh); `noesisctl.py test-ntfy`. Tested with a fake
+  server only.
 - Daily project-idea scout (07:30): GitHub new repos, Hugging Face trending,
   Show HN, arXiv → vault note `02 Knowledge/Project Ideas` and the morning
   brief; `/ideas` on demand. Failed sources are listed in the note.

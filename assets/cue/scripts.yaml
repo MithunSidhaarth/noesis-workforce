@@ -1,0 +1,124 @@
+# Starter scripts for Cue reels. NOESIS uses one only if no reel with the same
+# hook was made before; after these it writes new ones with the model.
+# Every claim must match the Cue README: no public release yet, so never say
+# "download" or "free"; the site is cue.mithunsidhaarth.in.
+scripts:
+  - id: approvals
+    hook: Your agent wants to run npm test
+    beats:
+      - {text: "Cue asks you in the notch, not a hidden terminal", clip: agent, secs: 3.6}
+      - {text: "Allow once. It runs. Tock smiles.", clip: agent, from: 2.0, secs: 3.4}
+      - {text: "Claude Code, Codex, Copilot CLI and more", clip: tock-agent-needs-you, secs: 3}
+    cta: Cue. A notch for Windows.
+    caption: |
+      Stop alt-tabbing to approve your coding agent.
+      Cue puts the request at the top of your screen: allow or deny with a click, or Y and N.
+      Building it in public. Link in bio.
+      #windows #claudecode #devtools #buildinpublic
+  - id: meet-tock
+    hook: Meet Tock
+    beats:
+      - {text: "The notch's own pill shape, as a little creature", clip: tock-music, secs: 3.2}
+      - {text: "It works when your agent works", clip: tock-agent-needs-you, secs: 2.8}
+      - {text: "and sleeps at night", clip: tock-night, secs: 2.8}
+    cta: Tock lives in Cue.
+    caption: |
+      Every notch needs a tenant.
+      Tock dances to music, leans out when your pointer is near and sleeps at night.
+      Link in bio.
+      #windows #uidesign #mascot #buildinpublic
+  - id: voice
+    hook: Ask your screen a question
+    beats:
+      - {text: "Hold Space and talk", clip: voice, secs: 4}
+      - {text: "Cue sends only the window you're looking at", clip: tool, secs: 3.2}
+      - {text: "Answer in the notch. Esc to stop.", clip: tock-talking, secs: 3}
+    cta: Cue. A notch for Windows.
+    caption: |
+      "What does this Rust error mean?" without leaving the terminal.
+      Cue asks before it sends anything, and only the window you pick.
+      Link in bio.
+      #windows #ai #rustlang #productivity
+  - id: music
+    hook: Whatever's playing, one place
+    beats:
+      - {text: "Spotify, YouTube, VLC, Apple Music", clip: media, secs: 3.2}
+      - {text: "Play, pause, skip from the top of your screen", clip: home, secs: 3.2}
+      - {text: "Tock dances along", clip: tock-music, secs: 2.8}
+    cta: Cue. A notch for Windows.
+    caption: |
+      Your music controls shouldn't live in five different apps.
+      Cue reads anything that reports to Windows' media controls.
+      Link in bio.
+      #windows #spotify #desksetup #productivity
+  - id: home
+    hook: The top of your screen, finally useful
+    beats:
+      - {text: "Hover the notch", clip: hover, secs: 2.6}
+      - {text: "Music, agents, focus, to-do, system", clip: home, secs: 4}
+      - {text: "Move away. It shrinks back.", clip: quiet, secs: 2.4}
+    cta: Cue. A notch for Windows.
+    caption: |
+      MacBooks got a notch. Windows gets Cue.
+      Move the pointer up and it opens into a page of tiles: music, agents, focus, to-do and system controls.
+      Link in bio.
+      #windows #windows11 #desksetup #buildinpublic
+  - id: errors
+    hook: When the AI can't answer
+    beats:
+      - {text: "Cue says so, plainly", clip: error, secs: 3.2}
+      - {text: "Retry, or switch to a local model", clip: error, secs: 2.6}
+      - {text: "Nothing goes to another provider without you", clip: tock-something-failed, secs: 3}
+    cta: Honest software. Cue.
+    caption: |
+      Errors should tell you what happened and what you can do next.
+      In Cue a timeout says so, and nothing is quietly sent to another provider.
+      Link in bio.
+      #ux #windows #ollama #ai
+  - id: build-pop
+    hook: Did the build pass?
+    beats:
+      - {text: "Your agent finishes while you're in another app", clip: tock-listening, secs: 3}
+      - {text: "The notch stretches with the result", clip: done, secs: 3}
+      - {text: "Green or red dot until you look", clip: tock-task-done, secs: 2.8}
+    cta: Cue. A notch for Windows.
+    caption: |
+      Never miss the end of a long build again.
+      Cue shows the result at the top of your screen, and keeps a dot there until you look.
+      Link in bio.
+      #devtools #claudecode #windows #buildinpublic
+  - id: risk
+    hook: Not every request is equal
+    beats:
+      - {text: "Cue labels the risk before you approve", clip: tool, secs: 3.4}
+      - {text: "Commands are never auto-approved", clip: agent, secs: 3.2}
+      - {text: "Deny with Esc. Allow with Enter.", clip: tock-agent-needs-you, secs: 2.8}
+    cta: Safe by default. Cue.
+    caption: |
+      An agent running a command should look different from an agent reading a file.
+      Cue labels each request with its risk, and commands always wait for you.
+      Link in bio.
+      #aisafety #claudecode #devtools #windows
+  - id: night
+    hook: Even the notch needs sleep
+    beats:
+      - {text: "Idle for a while? It shrinks to a dot", clip: sleep, secs: 2.8}
+      - {text: "Tock dozes off", clip: tock-night, secs: 3}
+      - {text: "Move the pointer up. Back in a blink.", clip: hover, secs: 2.6}
+    cta: Cue. A notch for Windows.
+    caption: |
+      Good UI knows when to get out of the way.
+      Cue shrinks to a single amber dot when nothing is happening.
+      Link in bio.
+      #uidesign #windows #minimalism #buildinpublic
+  - id: two-agents
+    hook: Two agents, one notch
+    beats:
+      - {text: "Claude Code on one repo, Codex on another", clip: agent, secs: 3.4}
+      - {text: "See who needs you at a glance", clip: tock-agent-needs-you, secs: 3}
+      - {text: "Approve without switching windows", clip: agent, from: 2.0, secs: 3.2}
+    cta: Cue. A notch for Windows.
+    caption: |
+      Running more than one coding agent? Cue shows every session and which one is waiting for you.
+      Link in bio.
+      #claudecode #codex #devtools #buildinpublic

@@ -10,7 +10,7 @@ database. Read `docs/ARCHITECTURE.md` first, then `docs/STATUS.md`.
 ## Commands
 
 ```bash
-python -m pytest -q                       # all tests (94); must stay green
+python -m pytest -q                       # all tests (102); must stay green
 ruff check --select F .                   # unused imports / undefined names
 cd apps/dashboard && npm ci && npm run build   # dashboard static export
 python scripts/noesisctl.py doctor        # config + health check
@@ -45,6 +45,11 @@ docker compose up -d --build              # full stack
   and CLI behave the same.
 - Notifications: `ctx.notify_owner(text, key, urgent=...)`; non-urgent waits for
   the morning brief.
+- Owner notifications fan out in `AgentContext.deliver`: Telegram (full text) and
+  ntfy (headline only). The first line of every notification is a standalone
+  headline starting with one emoji.
+- Reels: finished videos go through `post_ready_reel` (QC + publishing policy);
+  `integrations/video/cue_reel.py` renders new ones from `assets/`.
 - Brands/accounts live in `config/brands.yaml` (`workforce/brands.py`); publishers
   are keyed `platform:brand` in the factory, with `platform` as the fallback.
 - After each phase of work, update `docs/STATUS.md` and this file.

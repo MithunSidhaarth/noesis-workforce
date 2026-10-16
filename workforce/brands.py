@@ -5,6 +5,7 @@ voice notes and Postiz channel ids; the Postiz API key stays in .env.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -33,11 +34,22 @@ def get_brand(brand_id: str | None, config_dir: str | None = None) -> dict | Non
     return next((b for b in load_brands(config_dir) if b["id"] == brand_id), None) if brand_id else None
 
 
+def _mentions(text: str, word: str) -> bool:
+    return re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", text) is not None
+
+
 def brands_for(text: str, brands: list[dict]) -> list[dict]:
-    """Brands a piece of work belongs to: those whose topics match, or all brands without topics."""
+    """Brands a piece of work belongs to. Brands whose topics are mentioned (as whole
+    words) take it; brands without topics cover the platforms those don't post on.
+    So Cue work goes to the Cue brand on Instagram and still to your LinkedIn."""
     t = text.lower()
-    matched = [b for b in brands if b["topics"] and any(w in t for w in b["topics"])]
-    return matched or [b for b in brands if not b["topics"]] or brands
+    matched = [b for b in brands if b["topics"] and any(_mentions(t, w) for w in b["topics"])]
+    general = [b for b in brands if not b["topics"]]
+    if not matched:
+        return general or brands
+    covered = {pl for b in matched for pl in b["channels"]}
+    fill = [{**b, "channels": {k: v for k, v in b["channels"].items() if k not in covered}} for b in general]
+    return matched + [b for b in fill if b["channels"]]
 
 
 def voice_text(brand: dict | None) -> str:

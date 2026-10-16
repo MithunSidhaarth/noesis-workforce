@@ -115,7 +115,8 @@ class KnowledgeAgent(Agent):
             ctx.act("vault.write", f"vault:{key}", lambda r: {**vault.upsert_note(key, rel, fm, "\n".join(lines), ctx.bot.id), "evidence": rel},
                     target=rel, wait_on_approval=False)
         if ideas:
-            ctx.notify_owner("💡 Project ideas this week:\n" + "\n".join(f"• {it['title']}" for it in ideas[:5]) + f"\n(full note: {rel})",
+            ctx.notify_owner("💡 Trending project ideas\n\n" + "\n".join(f"• {it['title']}" for it in ideas[:5])
+                             + (f"\n\nThe full note is in your vault: {rel}" if vault is not None else ""),
                              key=key)
         return {"ideas": len(ideas), "signals": len(items), "errors": errors, "note": rel if vault is not None else None, "method": method}
 

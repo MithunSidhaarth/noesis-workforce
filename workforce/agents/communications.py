@@ -77,7 +77,7 @@ class CommunicationsAgent(Agent):
             return {"skipped": "gmail not configured"}
         msgs = mb.list_recent()
         set_integration_status(ctx.db, "gmail", "ok", f"{len(msgs)} recent messages")
-        important = []
+        important, drafting = [], False
         for m in msgs:
             if ctx.db.scalar("SELECT 1 FROM emails WHERE id=?", (m["id"],)):
                 continue  # already tracked: no duplicate actions
@@ -95,9 +95,14 @@ class CommunicationsAgent(Agent):
             if "draft_reply" in actions:
                 ctx.enqueue_self("draft_reply", {"email_id": m["id"]}, idempotency_key=f"draft:{m['id']}")
             if prio == "high":
-                important.append(f"• [{cat}] {m['subject'][:80]} — {m['from'][:60]}")
+                drafting = drafting or "draft_reply" in actions
+                important.append(f"• {str(cat or 'email').replace('_', ' ').capitalize()}: {m['subject'][:80]} (from {m['from'][:60]})")
         if important:
-            ctx.notify_owner("📬 Important email:\n" + "\n".join(important[:10]), key=f"mail:{','.join(sorted(important))[:200]}", urgent=True)
+            n = len(important)
+            ctx.notify_owner(f"📬 {n} important email{'s' if n != 1 else ''}\n\n" + "\n".join(important[:10])
+                             + ("\n\nI'm drafting replies for the ones that need one; they will be in the dashboard Email page."
+                                if drafting else ""),
+                             key=f"mail:{','.join(sorted(important))[:200]}", urgent=True)
         return {"fetched": len(msgs), "important": len(important)}
 
     def suggest_meeting_slots(self, ctx: AgentContext, task: Task) -> dict:

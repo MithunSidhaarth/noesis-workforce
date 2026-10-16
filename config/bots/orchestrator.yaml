@@ -3,7 +3,7 @@ name: Chief of Staff
 purpose: Coordinates the workforce, turns objectives into task graphs, tracks progress, and reports outcomes.
 agent: orchestrator
 instructions_file: orchestrator.md
-tools: [telegram.notify_owner, vault.write]
+tools: [telegram.notify_owner, ntfy.notify_owner, vault.write]
 can_message: ["*"]
 publish_topics: [workforce.broadcast]
 subscribe_topics: [opportunity.verified, application.ready, content.ready, alerts]

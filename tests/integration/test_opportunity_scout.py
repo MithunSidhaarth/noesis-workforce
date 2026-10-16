@@ -103,14 +103,14 @@ def test_scout_end_to_end(scout_env):
     # the match is not urgent (closes in 20 days), so it is held for the morning brief, not pinged
     alert = db.one("SELECT * FROM notifications WHERE key=?", (f"opp:{fel['id']}",))
     assert alert["status"] == "held" and not alert["urgent"]
-    assert "Closes in 2" in alert["text"] and "Looks official" in alert["text"] and f"Ref {fel['id'][-6:]}" in alert["text"]
+    assert "Closes in 2" in alert["text"] and "Looks official" in alert["text"] and f"ref {fel['id'][-6:]}" in alert["text"]
     assert {b["text"] for b in loads(alert["buttons_json"])[0]} == {"✅ Prepare", "⏰ Remind me", "✖ Not for me"}
     sent = services.extra["telegram"].sent
     assert not any("AI Research Fellowship" in s for s in sent)
     # the morning brief carries it, with a typeable command, and marks it digested
     services.queue.enqueue(TaskSpec(bot_id="orchestrator", kind="morning_brief", requested_by="scheduler"))
     run_all(services)
-    brief = [s for s in services.extra["telegram"].sent if "Morning brief" in s]
+    brief = [s for s in services.extra["telegram"].sent if "Good morning" in s]
     assert len(brief) == 1 and "AI Research Fellowship" in brief[0] and "/opp" in brief[0]
     assert db.scalar("SELECT status FROM notifications WHERE key=?", (f"opp:{fel['id']}",)) == "digested"
 

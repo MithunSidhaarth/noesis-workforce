@@ -74,7 +74,9 @@ class OpportunityScout(Agent):
                            (t, str(e)[:500], fails, "failing" if fails >= 3 else "degraded",
                             t + min(src["interval_s"] * (2 ** min(fails, 4)), 7 * 86400), src["id"]))
             if fails == 3:
-                ctx.notify_owner(f"⚠️ Source '{src['name']}' has failed 3 times in a row: {str(e)[:200]}", key=f"srcfail:{src['id']}:{int(t // 86400)}")
+                ctx.notify_owner(f"⚠️ An opportunity source keeps failing\n\n“{src['name']}” has failed 3 times in a row. "
+                                 f"Last error: {str(e)[:200]}\nI'll keep retrying it, less often. If it stays broken, "
+                                 "disable it in the dashboard.", key=f"srcfail:{src['id']}:{int(t // 86400)}")
             # The source's own backoff (next_check) is the retry mechanism; retrying the task
             # immediately would hammer the host and count one outage as several failures.
             raise PermanentError(f"source fetch failed (next attempt per source backoff): {e}") from e

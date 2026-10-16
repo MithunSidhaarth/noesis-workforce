@@ -40,25 +40,57 @@ def local(ts: float | None, fmt: str = "%a %d %b, %H:%M") -> str:
     return datetime.fromtimestamp(ts, tz()).strftime(fmt) if ts else "unknown"
 
 
+def day_label(ts: float | None) -> str:
+    """'Fri 18 Oct' (no leading zero, works on every platform)."""
+    if not ts:
+        return "unknown date"
+    d = datetime.fromtimestamp(ts, tz())
+    return f"{d:%a} {d.day} {d:%b}"
+
+
+def when_label(ts: float | None) -> str:
+    """'Fri 18 Oct at 09:00'."""
+    if not ts:
+        return "an unknown time"
+    return f"{day_label(ts)} at {datetime.fromtimestamp(ts, tz()):%H:%M}"
+
+
+def clip(text: str | None, n: int) -> str:
+    """Shorten to n characters, ending in an ellipsis when cut."""
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def plural(n: int, word: str, many: str | None = None) -> str:
+    return f"{n} {word if n == 1 else (many or word + 's')}"
+
+
 def closes_in(deadline: float | None) -> str:
     if not deadline:
-        return "Deadline not stated"
+        return "No deadline stated"
     secs = deadline - now()
     if secs < 0:
-        return f"Closed {local(deadline, '%d %b')}"
-    days = int(secs // 86400)
-    when = local(deadline, "%d %b %H:%M")
+        return f"Closed on {day_label(deadline)}"
     zone = datetime.now(tz()).tzname()
+    at = f"{datetime.fromtimestamp(deadline, tz()):%H:%M} {zone}"
+    days = int(secs // 86400)
     if days == 0:
-        return f"Closes today ({when} {zone}, {int(secs // 3600)}h left)"
-    return f"Closes in {days} day{'s' if days != 1 else ''} ({when} {zone})"
+        hours = int(secs // 3600)
+        left = "under an hour" if hours < 1 else plural(hours, "hour")
+        return f"Closes in {left} ({day_label(deadline)}, {at})"
+    return f"Closes in {plural(days, 'day')} ({day_label(deadline)}, {at})"
 
 
 # ---- lookups -------------------------------------------------------------------
+LIST_COMMAND = {"opportunities": "/opportunities", "approvals": "/inbox", "applications": "/missing"}
+
+
 def _resolve(db: Database, table: str, token: str, listing_key: str | None = None) -> dict:
     token = (token or "").strip()
+    listing = LIST_COMMAND.get(table, "/help")
     if not token:
-        raise OwnerActionError("Which one? Give the number or the 6-character ref.")
+        raise OwnerActionError("Which one? Add the number from the list or the 6-character ref, "
+                               f"e.g. {'/approve 1' if table == 'approvals' else '/opp 1'}.")
     if listing_key and token.isdigit():
         ids = loads(db.scalar("SELECT value FROM system_state WHERE key=?", (listing_key,)), [])
         n = int(token)
@@ -66,13 +98,13 @@ def _resolve(db: Database, table: str, token: str, listing_key: str | None = Non
             r = db.one(f"SELECT * FROM {table} WHERE id=?", (ids[n - 1],))
             if r:
                 return r
-        raise OwnerActionError(f"No item #{n} in the last list. Send the list command again.")
+        raise OwnerActionError(f"There is no item #{n} in the last list. Send {listing} for a fresh one.")
     rows = db.all(f"SELECT * FROM {table} WHERE id=? OR id LIKE ? LIMIT 2", (token, f"%{token}"))
     if len(rows) == 1:
         return rows[0]
     if not rows:
-        raise OwnerActionError(f"Nothing found for '{token}'.")
-    raise OwnerActionError(f"'{token}' matches more than one item; use more characters.")
+        raise OwnerActionError(f"I couldn't find anything with the ref '{clip(token, 20)}'. Send {listing} to see the current refs.")
+    raise OwnerActionError(f"'{clip(token, 20)}' matches more than one item. Type a few more characters of the ref.")
 
 
 def remember_listing(db: Database, key: str, ids: list[str]) -> None:
@@ -96,7 +128,8 @@ def find_application(db: Database, token: str) -> dict:
         opp = find_opportunity(db, token)
         app = db.one("SELECT * FROM applications WHERE opportunity_id=?", (opp["id"],))
         if not app:
-            raise OwnerActionError(f"'{opp['title'][:60]}' has no application yet. Use /confirm {ref(opp['id'])} first.")
+            raise OwnerActionError(f"“{clip(opp['title'], 60)}” has no application yet. "
+                                   f"Send /confirm {ref(opp['id'])} first and I'll prepare one.")
         return app
 
 
@@ -109,20 +142,25 @@ def plain_status(opp: dict) -> str:
     if s == "verified":
         return "Looks official"
     if s == "failed":
-        return "Problem: " + (next((n for n in notes if "passed" in n or "reachab" in n), None) or "failed checks")
+        return "Failed checks: " + (next((n for n in notes if "passed" in n or "reachab" in n), None) or "see details")
     if s == "needs_review":
         why = []
         for n in notes:
             if "aggregator" in n:
-                why.append("link is from a listing site, not the organiser")
+                why.append("the link is from a listing site, not the organiser")
             elif "deadline not stated" in n:
-                why.append("deadline not stated")
+                why.append("no deadline stated")
             elif "no application" in n:
                 why.append("no link to apply")
             elif "duplicate" in n:
                 why.append("may be a duplicate")
-        return "Needs a quick check: " + ("; ".join(dict.fromkeys(why)) or "see details")
+        return "Worth a quick check: " + ("; ".join(dict.fromkeys(why)) or "see details")
     return "Not checked yet"
+
+
+def kind_label(opp: dict) -> str:
+    k = (opp.get("type") or "").strip().lower()
+    return k if k and k not in ("unknown", "other") else "opportunity"
 
 
 def candidate_links(opp: dict) -> list[str]:
@@ -130,28 +168,40 @@ def candidate_links(opp: dict) -> list[str]:
 
 
 def opportunity_card(opp: dict, short: bool = False) -> tuple[str, list]:
+    """short=True is the notification (headline first); the full card answers /opp."""
     elig = loads(opp.get("eligibility_json"), [])
-    who = "; ".join(e[:90] for e in elig[:2]) if elig else "not stated"
-    lines = [f"🎯 {opp['title'][:120]}",
-             f"{opp['type'].capitalize()} · {closes_in(opp.get('deadline'))}",
-             f"For: {who}",
-             f"Effort: {opp.get('estimated_effort') or 'unknown'} · Match: {int((opp.get('relevance_score') or 0) * 100)}%",
-             f"Status: {plain_status(opp)}",
-             opp.get("official_url") or "No link in the listing"]
+    who = "; ".join(clip(e, 90) for e in elig[:2]) if elig else "not stated"
+    kind = kind_label(opp)
+    deadline = opp.get("deadline")
+    effort = opp.get("estimated_effort")
+    match = f"Match: {int((opp.get('relevance_score') or 0) * 100)}%" + (f" · Effort: {effort}" if effort else "")
+    if short:
+        head = f"🎯 New {kind} match" + (f", closes {day_label(deadline)}" if deadline and deadline > now() else "")
+        lines = [head, "", clip(opp["title"], 200)]
+    else:
+        lines = [f"🎯 {clip(opp['title'], 120)}", ""]
+    lines += [f"{kind.capitalize()} · {closes_in(deadline)}",
+              f"Who can apply: {who}",
+              match,
+              f"Status: {plain_status(opp)}",
+              opp.get("official_url") or "The listing has no link."]
     if not short:
         if opp.get("relevance_rationale"):
-            lines.append(f"Why: {opp['relevance_rationale']}")
+            lines.append(f"Why it matches: {opp['relevance_rationale']}")
         cands = candidate_links(opp)
         if cands and opp.get("verification_status") != "verified":
             lines.append(f"Possible official page (unconfirmed): {cands[0]}")
         if opp.get("skip_reason"):
-            lines.append(f"Skipped: {opp['skip_reason']}")
-    lines.append(f"Ref {ref(opp['id'])}")
+            lines.append(f"You skipped it: {opp['skip_reason']}")
     buttons = []
     if opp.get("application_status") not in ("SUBMITTED", "CLOSED") and opp.get("verification_status") != "failed":
         buttons = [[{"text": "✅ Prepare", "data": f"o:{opp['id']}:p"},
                     {"text": "⏰ Remind me", "data": f"o:{opp['id']}:r"},
                     {"text": "✖ Not for me", "data": f"o:{opp['id']}:s"}]]
+        lines += ["", "Prepare it, get deadline reminders, or skip it with the buttons below."]
+    else:
+        lines.append("")
+    lines.append(f"ref {ref(opp['id'])}")
     return "\n".join(lines), buttons
 
 
@@ -175,8 +225,8 @@ def schedule_deadline_reminders(db: Database, opp: dict, by: str, days_before=(7
         due = opp["deadline"] - d * 86400
         if due <= now():
             continue
-        title = (f"“{opp['title'][:80]}” closes in {d} day{'s' if d != 1 else ''} "
-                 f"({local(opp['deadline'], '%d %b %H:%M')}). {opp.get('official_url') or ''}".strip())
+        title = (f"“{clip(opp['title'], 80)}” closes in {plural(d, 'day')}, on {when_label(opp['deadline'])}. "
+                 f"{opp.get('official_url') or ''}".strip())
         cur = db.execute("INSERT OR IGNORE INTO reminders(id, title, due_at, source, ref_id, dedupe_key, created_at) "
                          "VALUES (?,?,?,?,?,?,?)", (new_id("rem"), title, due, by, opp["id"], f"oppdl:{opp['id']}:{d}", now()))
         n += cur.rowcount
@@ -192,7 +242,7 @@ def _safe_url(url: str | None) -> str | None:
         return None
     url = url.strip()
     if not re.match(r"^https://[^\s/$.?#][^\s]*$", url) or len(url) > 1000:
-        raise OwnerActionError("The link must be a full https:// address.")
+        raise OwnerActionError("The link must be a full https:// address, e.g. /confirm 1 https://example.org/apply.")
     return url
 
 
@@ -201,7 +251,7 @@ def confirm_opportunity(db: Database, token: str, by: str, url: str | None = Non
     It becomes verified and goes straight to Applications for preparation."""
     opp = find_opportunity(db, token)
     if opp["application_status"] in ("SUBMITTED", "CLOSED"):
-        raise OwnerActionError(f"That one is already {opp['application_status'].lower()}.")
+        raise OwnerActionError(f"“{clip(opp['title'], 60)}” is already {opp['application_status'].lower()}, so there is nothing to prepare.")
     url = _safe_url(url)
     notes = loads(opp["verification_notes_json"], []) + [f"confirmed by owner ({by})" + (f"; official link {url}" if url else "")]
     db.execute("UPDATE opportunities SET verification_status='verified', confirmed_by=?, official_url=COALESCE(?, official_url), "
@@ -234,15 +284,16 @@ def skip_opportunity(db: Database, token: str, by: str, reason: str = "") -> dic
 def remind_opportunity(db: Database, token: str, by: str) -> tuple[dict, int]:
     opp = find_opportunity(db, token)
     if not opp["deadline"]:
-        raise OwnerActionError("No deadline is stated for that one, so there is nothing to time a reminder to. "
-                               "Use /remind <when> <what> instead.")
+        raise OwnerActionError("This listing has no deadline, so I can't time reminders to it. "
+                               "Set your own instead, e.g. /remind fri 18:00 apply to the fellowship.")
     return opp, schedule_deadline_reminders(db, opp, by)
 
 
 def record_outcome(db: Database, token: str, outcome: str, by: str) -> dict:
     outcome = outcome.strip().lower().replace(" ", "_")
     if outcome not in OUTCOMES:
-        raise OwnerActionError(f"Outcome must be one of: {', '.join(OUTCOMES)}.")
+        raise OwnerActionError(f"I didn't recognise that outcome. Use one of: {', '.join(OUTCOMES)}, "
+                               f"e.g. /outcome {clip(token, 12) or '<ref>'} accepted.")
     app = find_application(db, token)
     hist = loads(app["history_json"], []) + [{"ts": now(), "from": app["state"], "to": "CLOSED", "note": f"outcome {outcome} ({by})"}]
     db.execute("UPDATE applications SET state='CLOSED', outcome=?, history_json=?, updated_at=? WHERE id=?",
@@ -257,11 +308,11 @@ def record_submission(db: Database, token: str, confirmation: str, by: str) -> d
     from .agents.applications import record_manual_submission
     app = find_application(db, token)
     if not confirmation.strip():
-        raise OwnerActionError("Add the confirmation number or a short note, e.g. /submitted abc123 email received 14 Oct.")
+        raise OwnerActionError(f"Add the confirmation number or a short note, e.g. /submitted {ref(app['id'])} confirmation email received.")
     try:
         out = record_manual_submission(db, app["id"], confirmation.strip()[:300], by)
     except ValueError as e:
-        raise OwnerActionError(str(e)) from e
+        raise OwnerActionError(f"I can't record that as submitted yet ({e}). Check where it stands with /opp {ref(app['opportunity_id'])}.") from e
     cancel_opportunity_reminders(db, app["opportunity_id"])
     return out
 
@@ -270,10 +321,10 @@ def record_submission(db: Database, token: str, confirmation: str, by: str) -> d
 def approval_message(db: Database, approval_id: str, bot_name: str) -> tuple[str, list]:
     a = db.one("SELECT * FROM approvals WHERE id=?", (approval_id,))
     if not a:
-        return f"Approval needed ({bot_name}).", []
+        return f"🙋 {bot_name} needs your OK\n\nSend /inbox to see the request.", []
     reasons = loads(a["reasons_json"], [])
-    text = "\n".join([f"🙋 {bot_name} needs your OK", a["summary"][:300], "", "Why it's asking:",
-                      *[f"• {r}" for r in reasons[:6]], "", f"Ref {ref(a['id'])}"])
+    text = "\n".join([f"🙋 {clip(bot_name, 40)} needs your OK", "", clip(a["summary"], 300), "", "Why it's asking:",
+                      *[f"• {r}" for r in reasons[:6]], "", "Nothing happens until you approve it.", f"ref {ref(a['id'])}"])
     return text, [[{"text": "✅ Approve", "data": f"a:{a['id']}:y"}, {"text": "✖ Deny", "data": f"a:{a['id']}:n"}]]
 
 
@@ -287,10 +338,10 @@ def decide(db: Database, token: str, grant: bool, by: str) -> dict:
     from .policies.engine import decide_approval
     a = find_approval(db, token)
     if a["status"] != "pending":
-        raise OwnerActionError(f"That request was already {a['status']}.")
+        raise OwnerActionError(f"That request was already {a['status']}, so there is nothing to decide. /inbox shows what is still waiting.")
     out = decide_approval(db, a["id"], grant, by=by)
     if not out:
-        raise OwnerActionError("That request is no longer pending.")
+        raise OwnerActionError("That request is no longer waiting for you. /inbox shows what is.")
     return out
 
 
@@ -311,7 +362,7 @@ def parse_when(text: str, ref_ts: float | None = None) -> tuple[float, str]:
             d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
             due = datetime.combine(d, dtime(int(m.group(2)), int(m.group(3))), z)
         except ValueError as e:
-            raise OwnerActionError(f"That date/time isn't valid: {e}") from e
+            raise OwnerActionError(f"That date or time isn't valid ({e}). Use the form /remind 2026-11-03 10:00 renew passport.") from e
         return _future(due, base), m.group(4)
     m = re.match(r"^in\s+(\d{1,4})\s*(m|min|mins|minutes?|h|hrs?|hours?|d|days?)\s+(.+)$", s, re.I)
     if m:
@@ -322,7 +373,7 @@ def parse_when(text: str, ref_ts: float | None = None) -> tuple[float, str]:
     if m:
         word, hh, mm = m.group(1).lower(), int(m.group(2)), int(m.group(3))
         if hh > 23 or mm > 59:
-            raise OwnerActionError("Use a 24-hour time like 18:30.")
+            raise OwnerActionError("Use a 24-hour time like 18:30, e.g. /remind tomorrow 18:30 call home.")
         if word == "today":
             day = base.date()
         elif word == "tomorrow":
@@ -334,13 +385,13 @@ def parse_when(text: str, ref_ts: float | None = None) -> tuple[float, str]:
             if ahead == 0 and datetime.combine(day, dtime(hh, mm), z) <= base:
                 day += timedelta(days=7)
         return _future(datetime.combine(day, dtime(hh, mm), z), base), m.group(4)
-    raise OwnerActionError("I couldn't read the time. Try one of:\n/remind tomorrow 09:00 call the bank\n"
+    raise OwnerActionError("I couldn't read when. Try one of these:\n/remind tomorrow 09:00 call the bank\n"
                            "/remind in 2h submit the form\n/remind fri 18:00 review essay\n/remind 2026-11-03 10:00 renew passport")
 
 
 def _future(due: datetime, base: datetime) -> float:
     if due <= base:
-        raise OwnerActionError(f"{due:%d %b %H:%M} is already in the past.")
+        raise OwnerActionError(f"{due:%a} {due.day} {due:%b} at {due:%H:%M} has already passed. Pick a time in the future.")
     return due.timestamp()
 
 
@@ -361,10 +412,10 @@ def profile_section(key: str) -> str:
 def set_profile_fact(db: Database, key: str, value: str, by: str) -> dict:
     key = key.strip().lower()
     if not re.match(r"^[a-z][a-z0-9_]{1,40}$", key):
-        raise OwnerActionError("Keys are lowercase words joined by _, e.g. graduation_year.")
+        raise OwnerActionError("Keys are lowercase words joined by _, e.g. /profile set graduation_year 2027.")
     value = value.strip()
     if not value or len(value) > 2000:
-        raise OwnerActionError("Give a value (up to 2000 characters).")
+        raise OwnerActionError(f"Add a value after the key (up to 2000 characters), e.g. /profile set {key} <value>.")
     sec = profile_section(key)
     db.execute("INSERT INTO profile_facts(key, value, section, sensitive, updated_at, updated_by) VALUES (?,?,?,?,?,?) "
                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, section=excluded.section, sensitive=excluded.sensitive, "
@@ -393,6 +444,23 @@ MISSING_TO_KEY = {"age": "age", "citizenship": "citizenship", "education level":
                   "short_bio (verified)": "short_bio"}
 
 
+MISSING_LABELS = {"short_bio (verified)": "a short bio", "verified profile facts (config/profile.yaml)": "your basic profile facts",
+                  "education level": "your degree", "citizenship": "your citizenship", "age": "your age", "gender": "your gender"}
+
+
+def missing_label(item: str) -> str:
+    """Plain-English name for an item an application is waiting on."""
+    if item in MISSING_LABELS:
+        return MISSING_LABELS[item]
+    if item.startswith("unrecognized criterion"):
+        return "your call on a criterion I can't check (" + item.split(":", 1)[-1].strip() + ")"
+    return item
+
+
+def lower_first(text: str) -> str:
+    return text[:1].lower() + text[1:]
+
+
 def missing_summary(db: Database) -> list[tuple[str, int, str]]:
     """(missing item, number of open applications waiting on it, how to supply it)."""
     counts: dict[str, int] = {}
@@ -406,11 +474,11 @@ def missing_summary(db: Database) -> list[tuple[str, int, str]]:
         if key:
             how = f"/profile set {key} <value>"
         elif item.startswith("unrecognized criterion"):
-            how = "read the listing and decide; then /confirm or /skip"
+            how = "read the listing, then /confirm or /skip it"
         elif item.startswith("verified profile facts"):
-            how = "/profile set <key> <value> for degree, citizenship, graduation_year…"
+            how = "/profile set <key> <value> for degree, citizenship, graduation_year and so on"
         else:
-            how = "add the document under documents: in config/profile.yaml"
+            how = "add the file under documents: in config/profile.yaml"
         out.append((item, n, how))
     return out
 
@@ -425,7 +493,7 @@ def log_work(db: Database, text: str, by: str) -> dict:
     if brand:
         text = rest.strip()
     if len(text) < 10:
-        raise OwnerActionError("Tell me what you worked on, e.g. /work shipped the voice agent demo: Whisper + Llama, 300ms latency")
+        raise OwnerActionError("Tell me a bit more about what you worked on, e.g. /work shipped the voice agent demo: Whisper + Llama, 300ms latency.")
     TaskQueue(db).enqueue(TaskSpec(bot_id="content_strategist", kind="log_work", payload={"text": text[:2000], "brand": brand},
                                    requested_by=by, idempotency_key=f"work:{sha(text)[:16]}:{brand}"))
     return {"brand": brand}

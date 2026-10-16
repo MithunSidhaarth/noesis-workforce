@@ -3,7 +3,7 @@ name: Opportunity Scout
 purpose: Continuously discovers internships, fellowships, hackathons, scholarships, competitions, events and grants.
 agent: opportunity_scout
 instructions_file: opportunity_scout.md
-tools: [web.fetch, telegram.notify_owner, vault.write]
+tools: [web.fetch, telegram.notify_owner, ntfy.notify_owner, vault.write]
 can_message: [quality, applications, orchestrator, knowledge]
 publish_topics: [opportunity.verified]
 model: {default_capability: extract, allowed_tiers: [none, cheap], daily_call_limit: 200, daily_budget_usd: 0.10}

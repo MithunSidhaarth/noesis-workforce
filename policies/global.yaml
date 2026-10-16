@@ -5,6 +5,7 @@ version: 1
 # Actions that have real external side effects. Anything not listed is denied.
 actions:
   telegram.notify_owner:   {side_effect: true, description: "Message the owner on Telegram"}
+  ntfy.notify_owner:       {side_effect: true, description: "Push a notification headline to the owner's ntfy topic (off until NTFY_TOPIC is set)"}
   email.send:              {side_effect: true, description: "Send an email from an authorized account"}
   email.draft:             {side_effect: true, description: "Create a draft in the mailbox (not sent)"}
   calendar.create_event:   {side_effect: true, description: "Create an event on the owner's calendar"}
@@ -19,12 +20,14 @@ actions:
 # Remove an entry to make dry-run silence it as well.
 dry_run_exempt:
   - telegram.notify_owner
+  - ntfy.notify_owner
   - vault.write
 
 # The emergency pause stops every other side effect, but you still need to hear
 # about approvals and failures while paused.
 pause_exempt:
   - telegram.notify_owner
+  - ntfy.notify_owner
 
 # Actions where sending twice is harmful. If a previous attempt started but its
 # outcome was never recorded (crash or timeout mid-call), it is marked
@@ -45,3 +48,4 @@ always_require_approval:
   - irreversible_commitment
   - unusual_commitment
   - unverified_facts
+  - template_draft          # a post the writer model didn't write (fallback template): never auto-published

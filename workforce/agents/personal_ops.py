@@ -40,7 +40,8 @@ class PersonalOpsAgent(Agent):
             # a reminder you set yourself arrives at the time you chose, even in quiet hours;
             # automatic deadline reminders wait for quiet hours to end
             mine = r["source"] in ("owner", "telegram", "dashboard", "user")
-            res = ctx.notify_owner(f"🔔 Reminder: {r['title']}", key=f"reminder:{r['id']}", urgent=True, force_now=mine)
+            head = "🔔 Reminder" if mine or not r.get("ref_id") else "⏰ Deadline coming up"
+            res = ctx.notify_owner(f"{head}\n\n{r['title']}", key=f"reminder:{r['id']}", urgent=True, force_now=mine)
             # only a real delivery (or a dry-run rehearsal of one) marks it sent; otherwise it stays
             # pending and the next sweep tries again
             if res is not None and res.status in ("succeeded", "dry_run", "duplicate"):
@@ -52,6 +53,6 @@ class PersonalOpsAgent(Agent):
         for n in nt.held(ctx.db, urgent_only=True, limit=10):
             if not nt.should_send_now(ctx.db, True):
                 break
-            res = ctx.deliver(n["id"], n["key"], n["text"], n["buttons"])
+            res = ctx.deliver(n["id"], n["key"], n["text"], n["buttons"], urgent=bool(n.get("urgent")))
             flushed += int(res is not None and res.status in ("succeeded", "dry_run", "duplicate"))
         return {"due": len(due), "sent": sent, "flushed": flushed}

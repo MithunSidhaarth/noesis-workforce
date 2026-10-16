@@ -125,10 +125,110 @@ class ContentStrategist(Agent):
 
 @register("content_studio")
 class ContentStudio(Agent):
-    accepts = {"draft_content", "render_reel", "publish_content"}
+    accepts = {"draft_content", "render_reel", "publish_content", "post_ready_reel", "refill_reels"}
 
     def handlers(self):
-        return {"draft_content": self.draft, "render_reel": self.render, "publish_content": self.publish}
+        return {"draft_content": self.draft, "render_reel": self.render, "publish_content": self.publish,
+                "post_ready_reel": self.post_ready_reel, "refill_reels": self.refill_reels}
+
+    def refill_reels(self, ctx: AgentContext, task: Task) -> dict:
+        """Keep a brand's reel queue topped up: when fewer than `keep_queued` reels are
+        waiting, write a new script nobody has used (starter bank first, then the
+        model), render it from the brand's footage and queue it in the next slot."""
+        from integrations.video.cue_reel import ASSETS, check_script, clips, render_cue_reel
+        from integrations.video.render import available
+
+        from .. import reels as rl
+        from ..brands import get_brand
+        bid = task.payload.get("brand") or "cue"
+        brand = get_brand(bid)
+        if not brand:
+            raise PermanentError(f"unknown brand {bid!r} (config/brands.yaml)")
+        cfg = {"every_hours": 3, "window": "09:00-23:00", "keep_queued": 2, **(brand.get("reels") or {})}
+        waiting = rl.queued_count(ctx.db, bid)
+        if waiting >= int(cfg["keep_queued"]):
+            return {"brand": bid, "waiting": waiting, "made": 0}
+        if not available():
+            raise PermanentError("ffmpeg is not installed on this server")
+        used = rl.used_hooks(ctx.db, bid)
+        script, method = None, "starter"
+        bank = Path(task.payload.get("scripts") or ASSETS / "cue" / "scripts.yaml")
+        if bank.is_file():
+            import yaml
+            for sc in (yaml.safe_load(bank.read_text(encoding="utf-8")) or {}).get("scripts") or []:
+                if rl.norm(sc.get("hook", "")) not in used and not check_script(sc):
+                    script = sc
+                    break
+        if script is None and ctx.has_model("write"):
+            method = "model"
+            prompt = (f"Write ONE new Instagram reel script for {brand['name']}.\nABOUT: {brand.get('about')}\n"
+                      f"AUDIENCE: {brand.get('audience')}\nVOICE: {brand.get('voice')}\n"
+                      f"FOOTAGE you can use (clip names, each is a real screen recording): {', '.join(clips())}. "
+                      "Pick clips that actually show what the line says.\n"
+                      "Only claim features named in ABOUT. Never say download, free, available now or launch.\n"
+                      "It must be about a different angle from every hook already used:\n- "
+                      + "\n- ".join(sorted(used)[-40:] or ["(none yet)"]) +
+                      "\nReply JSON: {\"hook\": str (max 7 words), \"beats\": [{\"text\": str (max 50 chars), \"clip\": str, "
+                      "\"secs\": number 2.5-4}] (3 beats), \"cta\": str (max 6 words), \"caption\": str (hook line, 2-3 short lines, "
+                      "'Link in bio.', then 3-5 hashtags; under 600 chars)}")
+            for _ in range(2):
+                try:
+                    d = ctx.llm("write", prompt, max_tokens=900).json()
+                except Exception as e:  # noqa: BLE001
+                    ctx.log(f"reel script failed: {e}", level="warning")
+                    continue
+                if not check_script(d) and rl.norm(d.get("hook", "")) not in used and str(d.get("caption") or "").strip():
+                    script = d
+                    break
+        if script is None:
+            ctx.notify_owner(f"🎬 I'm out of new {brand['name']} reel ideas\n\nEvery starter script has been used and no "
+                             "writing model is set up, so no new reel was made. Add scripts to assets/cue/scripts.yaml "
+                             "or set GEMINI_API_KEY.", key=f"reels-empty:{bid}:{int(now() // 86400)}")
+            return {"brand": bid, "waiting": waiting, "made": 0, "reason": "no unused script"}
+        out = Path(get_settings().data_dir) / "media" / "ready" / f"{bid}-{sha(rl.norm(script['hook']))[:10]}.mp4"
+        info = render_cue_reel(script, out)
+        at = rl.next_slot(ctx.db, bid, float(cfg["every_hours"]), str(cfg["window"]))
+        tid, _ = ctx.enqueue_self("post_ready_reel", {
+            "path": info["path"], "caption": str(script["caption"]).strip(), "title": script["hook"], "hook": script["hook"],
+            "brand": bid, "series": f"{bid}-auto", "license": "generated-by-noesis (Cue footage, Motion-as-code SFX)",
+            "script": {k: script.get(k) for k in ("hook", "beats", "cta")}}, idempotency_key=f"auto-reel:{bid}:{rl.norm(script['hook'])}",
+            run_after=at)
+        return {"brand": bid, "waiting": waiting + 1, "made": 1, "method": method, "hook": script["hook"], "at": at, "task": tid}
+
+    def post_ready_reel(self, ctx: AgentContext, task: Task) -> dict:
+        """A finished reel you made (or I rendered outside NOESIS) with its caption.
+        Queued with run_after for its slot; it goes through QC and the publishing
+        policy like everything else, so it only posts when publishing is enabled."""
+        from integrations.video.render import available, validate_file
+
+        from ..brands import get_brand
+        p = task.payload
+        path = Path(str(p.get("path") or ""))
+        caption = str(p.get("caption") or "").strip()
+        if not path.is_file():
+            raise PermanentError(f"reel file not found: {path}")
+        if not caption:
+            raise PermanentError("a ready reel needs a caption")
+        brand = get_brand(p.get("brand"))
+        if p.get("brand") and not brand:
+            raise PermanentError(f"unknown brand {p.get('brand')!r} (config/brands.yaml)")
+        if not available():
+            raise PermanentError("ffmpeg/ffprobe is not installed, so the reel can't be checked")
+        info = validate_file(path)
+        cid = new_id("cnt")
+        title = str(p.get("title") or caption.split("\n")[0])[:120]
+        asset = {"kind": "video", "path": str(path), "license": p.get("license") or "owner-provided",
+                 "validated": info["validated"], "problems": info["problems"], "duration": info["duration"],
+                 "resolution": f"{info['width']}x{info['height']}"}
+        brief = {"topic": title, "platform": "instagram", "brand": brand["id"] if brand else None, "format": "reel",
+                 "ready_made": True, "series": p.get("series"), "hook": p.get("hook") or title, "script": p.get("script")}
+        ctx.db.execute("INSERT INTO content_items(id, title, platform, format, category, state, brief_json, body, assets_json, "
+                       "content_hash, brand, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (cid, title, "instagram", "reel", p.get("category") or "project_update", "IDEA", dumps(brief), caption,
+                        dumps([asset]), sha(caption.lower())[:32], brief["brand"], now(), now()))
+        set_state(ctx, cid, "RENDER", f"ready-made reel {path.name}")
+        self._request_qc(ctx, cid)
+        return {"content_id": cid, "asset": asset}
 
     def draft(self, ctx: AgentContext, task: Task) -> dict:
         item = ctx.db.one("SELECT * FROM content_items WHERE id=?", (task.payload["content_id"],))
@@ -211,7 +311,9 @@ class ContentStudio(Agent):
             return
         if p["status"] == "failed":
             set_state(ctx, cid, "BLOCKED", "; ".join(p.get("notes", []))[:500])
-            ctx.notify_owner(f"✋ Content blocked by QC: {item['title'][:80]}\n" + "\n".join(p.get("notes", [])[:5]), key=f"qcblock:{cid}")
+            ctx.notify_owner(f"✋ A post was held back by quality checks\n\n“{item['title'][:80]}”\n"
+                             + "\n".join(f"• {n}" for n in p.get("notes", [])[:5])
+                             + "\n\nNothing was published. Review it on the dashboard Content page.", key=f"qcblock:{cid}")
             return
         md = loads(item["brief_json"], {})
         md["qc"] = p
@@ -234,7 +336,8 @@ class ContentStudio(Agent):
         attrs = {"category": item["category"], "media_valid": all(a.get("validated", True) for a in assets),
                  "not_duplicate": True, "licenses_ok": qc.get("licenses_ok", False), "has_claims": bool(loads(item["claims_json"], [])),
                  "facts_verified": qc.get("facts_verified", False),
-                 "flags": ["sensitive_disclosure"] if qc.get("sensitive") else []}
+                 "flags": (["sensitive_disclosure"] if qc.get("sensitive") else [])
+                 + (["template_draft"] if loads(item["script_json"], {}).get("method") == "template" else [])}
 
         def executor(req):
             if pub is None or not pub.configured():

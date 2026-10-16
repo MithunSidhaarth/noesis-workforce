@@ -72,8 +72,9 @@ class Scheduler:
                     self.db.execute("UPDATE schedules SET next_run=?, skipped=? WHERE id=?", (nxt, skipped, s["id"]))
                     if skipped == SKIP_ALERT:
                         owner_alert(self.db, f"stuck:{s['id']}:{s['last_task_id']}",
-                                    f"⚠️ {s['bot_id']} hasn't run “{s['name']}” {skipped} times: the previous run is still {st}. "
-                                    "Check /inbox or the dashboard Tasks page.", urgent=True)
+                                    f"⚠️ A scheduled job is stuck\n\n{s['bot_id']} has skipped “{s['name']}” {skipped} times "
+                                    f"because the previous run is still {st.replace('_', ' ')}. Check /inbox for a request "
+                                    "waiting on you, or the dashboard Tasks page.", urgent=True)
                     continue
             try:
                 tid, created = self.queue.enqueue(TaskSpec(
@@ -100,8 +101,8 @@ class Scheduler:
             if t - self.started < 600 or hb is None:
                 continue
             owner_alert(self.db, f"offline:{b['id']}:{int(t // 86400)}",
-                        f"⚠️ {b['name']} stopped responding (no heartbeat for 5 min). The worker restarts it automatically; "
-                        "if this repeats, check `docker compose logs worker`.", urgent=True)
+                        f"⚠️ {b['name']} stopped responding\n\nNo heartbeat for 5 minutes. The worker restarts it "
+                        "automatically. If this keeps happening, check the logs with: docker compose logs worker", urgent=True)
         out["bots_offline"] = len(gone)
         out["approvals_expired"] = self.expire_approvals()
         out["workflows_finished"] = self.finish_workflows()
@@ -119,7 +120,8 @@ class Scheduler:
                 self.db.execute("UPDATE tasks SET status='cancelled', error='approval expired unanswered', finished_at=?, "
                                 "updated_at=? WHERE id=? AND status='waiting_approval'", (now(), now(), a["task_id"]))
             audit(self.db, "system", "approval.expired", a["task_id"], {"approval_id": a["id"]})
-            owner_alert(self.db, f"apprexp:{a['id']}", f"⌛ Expired unanswered (nothing was done): {a['summary'][:150]}")
+            owner_alert(self.db, f"apprexp:{a['id']}", f"⌛ A request expired without an answer\n\n"
+                                                      f"Nothing was done: {a['summary'][:150]}")
         return len(rows)
 
     def finish_workflows(self) -> int:
@@ -196,10 +198,13 @@ def workflow_report(db: Database, w: dict, ok: bool) -> str:
         new = db.scalar("SELECT COUNT(*) FROM opportunities WHERE discovered_at>=?", (w["created_at"],))
         good = db.scalar("SELECT COUNT(*) FROM opportunities WHERE discovered_at>=? AND COALESCE(relevance_score,0)>=0.7 "
                          "AND verification_status!='failed'", (w["created_at"],))
-        return f"✅ Search finished: {new} new listing(s), {good} good match(es). /opportunities to see the shortlist."
+        return (f"✅ Search finished\n\n{new} new listing{'s' if new != 1 else ''}, {good} good "
+                f"match{'es' if good != 1 else ''}. Send /opportunities to see the shortlist.")
     if w["name"] == "capture_knowledge":
-        return f"✅ Saved to your vault: {params.get('url', '')}" if ok else f"✖ Couldn't capture {params.get('url', '')}"
+        return (f"✅ Saved to your vault\n\n{params.get('url', '')}" if ok else
+                f"✖ Couldn't save that link\n\n{params.get('url', '')}\nThe dashboard Logs page has the reason.")
     if w["name"] == "content_from_topic":
-        return f"✅ Content brief ready for “{str(params.get('topic', ''))[:60]}”. See the dashboard Content page." if ok else \
-            f"✖ Couldn't build a content brief for “{str(params.get('topic', ''))[:60]}”."
-    return f"{'✅' if ok else '✖'} {name} {'finished' if ok else 'failed'}."
+        return (f"✅ Content brief ready\n\nFor “{str(params.get('topic', ''))[:60]}”. Review it on the dashboard Content page."
+                if ok else f"✖ Couldn't build a content brief\n\nFor “{str(params.get('topic', ''))[:60]}”. "
+                "The dashboard Logs page has the reason.")
+    return (f"✅ Done: {name}" if ok else f"✖ {name.capitalize()} failed\n\nThe dashboard Tasks page has the details.")
