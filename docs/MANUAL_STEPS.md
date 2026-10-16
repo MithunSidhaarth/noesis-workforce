@@ -6,7 +6,7 @@ each one has a check so you know it worked. Details are in
 
 ## Required
 
-1. **Get a server.** Either the free Oracle Cloud ARM machine in private mode
+1. **Get a machine.** Your own PC to start with ([WINDOWS](WINDOWS.md)), or the free Oracle Cloud ARM machine in private mode
    (no domain needed, follow [ORACLE](ORACLE.md)), or rent a VPS (Ubuntu 24.04,
    4 GB RAM recommended) and point a domain's A record at it.
    *Check:* you can SSH in.

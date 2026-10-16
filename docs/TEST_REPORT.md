@@ -66,6 +66,11 @@ prove that a real provider accepts the call.
   API was bound to 127.0.0.1 only and unreachable from outside; `doctor`
   reported private mode with 0 problems.
 
+- Own-PC setup (docs/WINDOWS.md): the vault was mounted from a path with
+  spaces through `NOESIS_VAULT_HOST`; it was writable from the containers and
+  its `.system/` folder was empty inside them (tmpfs overlay). Docker Desktop on
+  Windows itself was not available here.
+
 ## Not tested live (network blocked from the build environment)
 
 Telegram (messages and buttons), Gmail, Google Calendar, LinkedIn, Instagram,

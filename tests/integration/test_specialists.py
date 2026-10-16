@@ -115,6 +115,14 @@ def test_obsidian_preserves_user_notes_and_avoids_duplicates(env):
     assert "created" in (Path(env.vault) / "99 System/Workforce/changelog.md").read_text()
     with pytest.raises(Exception):
         v.upsert_note("k2", "../../etc/passwd.md", {}, "x", "test")
+    (Path(env.vault) / ".system").mkdir()
+    (Path(env.vault) / ".system" / "mcp_token").write_text("secret")
+    for hidden in (".system/mcp_token", ".system/note.md", "09 Opportunities/../.obsidian/x.md"):
+        with pytest.raises(Exception):
+            v.read(hidden)
+        with pytest.raises(Exception):
+            v.upsert_note("k3", hidden, {}, "x", "test")
+    assert (Path(env.vault) / ".system" / "mcp_token").read_text() == "secret"
     fresh = Vault(env.vault)  # index rebuilt from disk after restart
     assert fresh.upsert_note("k1", "y.md", {"title": "t"}, "updated body", "test")["changed"] is False
 

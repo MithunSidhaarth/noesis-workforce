@@ -96,6 +96,8 @@ class Vault:
         p = (self.root / rel).resolve()
         if self.root not in p.parents and p != self.root:
             raise VaultError(f"path escapes the vault: {rel}")
+        if any(part.startswith(".") for part in p.relative_to(self.root).parts):
+            raise VaultError(f"hidden vault folders (.system, .obsidian, ...) are off limits: {rel}")
         return p
 
     def read(self, rel: str) -> str:

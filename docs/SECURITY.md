@@ -44,6 +44,9 @@ below hold even if a model ignores its prompt.
 - OAuth scopes are minimal: Gmail `readonly` + `compose` (drafts), Calendar
   `readonly`. Sending and calendar writes are additionally off in policy.
 - The vault's `.system/mcp_token` was never read or copied during the build.
+- At runtime `.system/` is covered by an empty tmpfs in every container, and the
+  vault adapter refuses any path with a hidden (dot) folder, so no bot can read
+  or write the vault's tokens even when the real vault is mounted directly.
 
 ## Your vault
 

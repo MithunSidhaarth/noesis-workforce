@@ -12,7 +12,9 @@ x-app: &app
   restart: unless-stopped
   volumes:
     - ./data:/data
-    - ./vault:/vault
+    # NOESIS_VAULT_HOST: where the vault is on this machine (default ./vault, filled by Syncthing).
+    # On your own PC point it straight at your Obsidian vault (docs/WINDOWS.md).
+    - ${NOESIS_VAULT_HOST:-./vault}:/vault
     - ./config/profile.yaml:/app/config/profile.yaml:ro
     - ./prompts/content:/app/prompts/content:ro
   networks: [noesis]
@@ -22,7 +24,8 @@ x-app: &app
   security_opt: ["no-new-privileges:true"]
   cap_drop: [ALL]
   read_only: true
-  tmpfs: [/tmp]
+  # /vault/.system is hidden behind an empty tmpfs: no container can see the vault's tokens.
+  tmpfs: [/tmp, /vault/.system]
 
 services:
   api:
@@ -116,7 +119,7 @@ services:
     hostname: noesis-vps
     environment: { PUID: "10001", PGID: "10001" }
     volumes:
-      - ./vault:/var/syncthing/vault
+      - ${NOESIS_VAULT_HOST:-./vault}:/var/syncthing/vault
       - ./data/syncthing:/var/syncthing/config
     # Sync protocol only. The admin GUI is NOT published; reach it through an SSH tunnel:
     #   ssh -L 8384:127.0.0.1:8384 you@vps  then  docker compose exec syncthing ... (see docs/DEPLOYMENT.md)

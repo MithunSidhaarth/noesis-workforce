@@ -38,7 +38,8 @@ python -m uvicorn services.api.app:app --port 8000   # API (+ dashboard once bui
 ```
 
 For the real server, follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (12 steps), or
-**[docs/ORACLE.md](docs/ORACLE.md)** for the free Oracle Cloud option with no domain.
+**[docs/ORACLE.md](docs/ORACLE.md)** for the free Oracle Cloud option with no domain, or
+**[docs/WINDOWS.md](docs/WINDOWS.md)** to run it on your own PC.
 
 ## Using it day to day
 
@@ -58,6 +59,7 @@ For the real server, follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (12 ste
 |---|---|
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | components, how work flows, design decisions |
 | [DEPLOYMENT](docs/DEPLOYMENT.md) | VPS setup from a clean machine, update, rollback |
+| [WINDOWS](docs/WINDOWS.md) | run it on your own PC with Docker Desktop, writing straight into your vault |
 | [ORACLE](docs/ORACLE.md) | €0 option: Oracle Cloud Always Free ARM machine, private mode over Tailscale |
 | [CONFIGURATION](docs/CONFIGURATION.md) | every env var, policy and bot setting |
 | [INTEGRATIONS](docs/INTEGRATIONS.md) | integration checklist and what is live-tested |
