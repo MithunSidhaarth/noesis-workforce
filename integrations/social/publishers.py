@@ -8,6 +8,7 @@ without a platform ID returned by the API.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -260,6 +261,85 @@ class PostizPublisher:
             raise _revoked("postiz", "Postiz is not configured (POSTIZ_API_KEY and a channel id in config/brands.yaml)")
         self._channel()  # fail on a missing/disabled channel before uploading anything
         return self._post(caption, [self._upload(path)])
+
+    def publish_video_file(self, path: str | os.PathLike, text: str, title: str = "", **_) -> dict:
+        return self.publish_reel_file(path, text)
+
+
+class ZernioPublisher:
+    """Publishes through Zernio (zernio.com, formerly Late): free for the first two
+    connected accounts. You connect LinkedIn/Instagram on zernio.com; NOESIS sends
+    the finished post. Media: presign -> PUT to storage -> post with mediaItems.
+    A single video on Instagram publishes as a Reel. Evidence is Zernio's post id
+    and per-platform status; the platform URL is kept when Zernio returns it.
+    """
+
+    def __init__(self, account_id: str, platform: str, api_key: str | None = None, base_url: str | None = None,
+                 transport=None):
+        self.zernio_account = account_id
+        self.platform = platform
+        self.name = f"zernio:{platform}"
+        self.key = api_key if api_key is not None else os.environ.get("ZERNIO_API_KEY", "")
+        self.base = (base_url or os.environ.get("ZERNIO_API_URL") or "https://zernio.com/api/v1").rstrip("/")
+        self.client = httpx.Client(transport=transport, timeout=300)
+        self.account_id = f"zernio:{account_id}"
+
+    def configured(self) -> bool:
+        return bool(self.key and self.zernio_account)
+
+    def _h(self) -> dict:
+        return {"Authorization": f"Bearer {self.key}"}
+
+    def _check(self, r: httpx.Response, step: str) -> None:
+        if r.status_code in (401, 403):
+            raise _revoked("zernio", f"Zernio rejected the API key or account (HTTP {r.status_code})")
+        if r.status_code == 409:
+            raise IntegrationError("Zernio: the same content was already posted to this account in the last 24 hours")
+        if r.status_code >= 300:
+            raise IntegrationError(f"Zernio {step} failed HTTP {r.status_code}: {r.text[:200]}")
+
+    def _upload(self, path: str | os.PathLike) -> str:
+        p = Path(path)
+        ctype = "video/mp4" if p.suffix.lower() == ".mp4" else "video/quicktime" if p.suffix.lower() == ".mov" else "image/png"
+        r = self.client.post(f"{self.base}/media/presign", headers=self._h(),
+                             json={"filename": p.name, "contentType": ctype, "size": p.stat().st_size})
+        self._check(r, "presign")
+        d = r.json()
+        with p.open("rb") as f:
+            up = self.client.put(d["uploadUrl"], content=f.read(), headers={"Content-Type": ctype})
+        if up.status_code >= 300:
+            raise IntegrationError(f"Zernio media upload failed HTTP {up.status_code}")
+        return d["publicUrl"]
+
+    def _post(self, text: str, media_url: str | None) -> dict:
+        body: dict = {"content": text, "publishNow": True,
+                      "platforms": [{"platform": self.platform, "accountId": self.zernio_account}]}
+        if media_url:
+            body["mediaItems"] = [{"url": media_url, "type": "video"}]
+        r = self.client.post(f"{self.base}/posts", headers={**self._h(), "x-request-id": "noesis-" + hashlib.sha256(f"{self.zernio_account}|{text}|{media_url}".encode()).hexdigest()[:32]},
+                             json=body)
+        self._check(r, "create post")
+        post = (r.json() or {}).get("post") or {}
+        pid = post.get("_id")
+        if not pid:
+            raise IntegrationError(f"Zernio accepted the request but returned no post id: {r.text[:200]}")
+        plat = next((x for x in post.get("platforms") or [] if x.get("platform") == self.platform), {})
+        if plat.get("status") in ("failed", "error"):
+            raise IntegrationError(f"Zernio reports the {self.platform} post failed: {str(plat)[:200]}")
+        return {"platform_id": f"zernio:{pid}", "url": plat.get("platformPostUrl"),
+                "evidence": f"Zernio post {pid}: {self.platform} {plat.get('status') or post.get('status') or 'accepted'}"}
+
+    def publish_text(self, text: str) -> dict:
+        if not self.configured():
+            raise _revoked("zernio", "Zernio is not configured (ZERNIO_API_KEY and an account id in config/brands.yaml)")
+        if self.platform == "instagram":
+            raise IntegrationError("Instagram needs an image or video; this item has none")
+        return self._post(text, None)
+
+    def publish_reel_file(self, path: str | os.PathLike, caption: str, **_) -> dict:
+        if not self.configured():
+            raise _revoked("zernio", "Zernio is not configured (ZERNIO_API_KEY and an account id in config/brands.yaml)")
+        return self._post(caption, self._upload(path))
 
     def publish_video_file(self, path: str | os.PathLike, text: str, title: str = "", **_) -> dict:
         return self.publish_reel_file(path, text)

@@ -1,8 +1,8 @@
 # Your accounts (see brands.example.yaml for every option).
 # Each piece of work you log (/work on Telegram, or the Monday plan) becomes one
 # post per brand per channel below, written in that brand's voice.
-# Channel ids: connect the account in Postiz, then copy its id here.
-# POSTIZ_API_KEY goes in .env, never here.
+# Channel ids: connect the account on zernio.com (free for 2 accounts) and copy its
+# account id into zernio_account (or use Postiz instead). API keys go in .env, never here.
 brands:
   - id: cuenotch
     name: cue.notch
@@ -12,7 +12,7 @@ brands:
     voice: "first-person build log: what I built, the problem, what worked, one lesson; calm, specific, no hype"
     topics: []
     channels:
-      linkedin: {postiz_integration: ""}
+      linkedin: {zernio_account: "", postiz_integration: ""}
   - id: msthinks
     name: msthinks
     handle: "@msthinks"
@@ -21,4 +21,4 @@ brands:
     voice: "short, visual, one idea per reel; hook under 8 words; curious and plain-spoken"
     topics: []
     channels:
-      instagram: {postiz_integration: ""}
+      instagram: {zernio_account: "", postiz_integration: ""}

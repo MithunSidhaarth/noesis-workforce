@@ -14,7 +14,7 @@ After any change to `.env`, run `docker compose up -d`.
 | 2 | Gemini key | 3 min | free | real writing for posts, answers and ideas |
 | 3 | Telegram bot | 5 min | free | your phone remote: approvals, `/work`, morning brief |
 | 4 | Gmail and Calendar | 15 min | free | mail watching, replies flagged, email applications |
-| 5 | Posting accounts | 20–40 min | free or $29/mo | auto-posting for cue.notch and msthinks |
+| 5 | Posting accounts | 10–40 min | free (Zernio) | auto-posting for cue.notch and msthinks |
 | 6 | Go live | 2 min | free | real sends and posts |
 
 ---
@@ -112,18 +112,25 @@ First, write one line each in `config/brands.yaml`: what the brand is about
 
 Then pick one way to connect the accounts:
 
-### Option A: Postiz ($29/month, easiest, recommended if cue.notch is a LinkedIn *page*)
+### Option A: Zernio (free for 2 accounts, recommended)
 
-Postiz holds the logins; NOESIS sends it the finished post. No developer apps,
-company pages work, tokens don't expire on you.
+Zernio holds the logins; NOESIS sends it the finished post and reel. Free for the
+first two connected accounts with unlimited posts, which is exactly cue.notch
+and msthinks. No developer apps.
 
-1. Sign up at postiz.com (7-day trial, then Standard $29/month for 5 channels).
-2. **Add channel → LinkedIn** (or LinkedIn Page) → sign in as cue.notch.
-3. **Add channel → Instagram** → sign in as msthinks (must be a Professional
-   account: Instagram app → Settings → Account type → Switch to professional).
-4. For each channel open **Preferences** and copy its id into `config/brands.yaml`
-   (`postiz_integration:`).
-5. **Settings → Public API**: copy the key into `.env` as `POSTIZ_API_KEY`.
+1. Sign up at zernio.com.
+2. Connect **LinkedIn** as cue.notch (personal profile or company page).
+3. Connect **Instagram** as msthinks. It must be a Professional account
+   (Instagram app → Settings → Account type → Switch to professional); no
+   Facebook Page needed.
+4. Copy each account's id into `config/brands.yaml` (`zernio_account:`).
+5. Dashboard → **API keys** → create a read & write key; put it in `.env` as
+   `ZERNIO_API_KEY`.
+
+### Option A2: Postiz ($29/month)
+
+Same idea, paid: connect the channels on postiz.com, copy each channel id into
+`postiz_integration:`, and put `POSTIZ_API_KEY` in `.env`.
 
 ### Option B: direct APIs (free, more setup)
 
@@ -155,7 +162,7 @@ published" entries for both brands.
 When the dry-run log looks right for a few days:
 
 1. **Posting:** in `policies/publishing.yaml` set `enabled: true` and put your
-   accounts in `accounts_allowlist` (`postiz:<channel id>` for Option A, or
+   accounts in `accounts_allowlist` (`zernio:<account id>` for Option A, `postiz:<channel id>` for A2, or
    `linkedin:urn:li:person:…` / `instagram:<user id>` for Option B).
 2. **Auto-apply:** already set up as *approved-by-me*: when you tap **Prepare**
    or send `/confirm <n>`, an application that goes by email is sent as soon as

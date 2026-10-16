@@ -220,3 +220,35 @@ def test_one_approval_is_enough_to_send_an_email_application(env, services):
     assert sent == [mine]
     assert env.db.scalar("SELECT state FROM applications WHERE opportunity_id=?", (mine,)) == "SUBMITTED"
     assert env.db.scalar("SELECT state FROM applications WHERE opportunity_id=?", (other,)) == "REVIEW"
+
+
+def test_zernio_publisher_presigns_uploads_and_posts_reel(tmp_path):
+    from integrations.social.publishers import ZernioPublisher
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.host, req.url.path, req.headers.get("authorization")))
+        if req.url.path.endswith("/media/presign"):
+            assert json.loads(req.content)["contentType"] == "video/mp4"
+            return httpx.Response(200, json={"uploadUrl": "https://storage.test/put/1", "publicUrl": "https://cdn.test/1.mp4"})
+        if req.url.host == "storage.test":
+            assert req.content == b"REEL"
+            return httpx.Response(200)
+        if req.url.path.endswith("/posts"):
+            body = json.loads(req.content)
+            assert body["publishNow"] and body["platforms"] == [{"platform": "instagram", "accountId": "acc1"}]
+            assert body["mediaItems"] == [{"url": "https://cdn.test/1.mp4", "type": "video"}]
+            assert req.headers["x-request-id"].startswith("noesis-")
+            return httpx.Response(201, json={"post": {"_id": "p1", "status": "published", "platforms": [
+                {"platform": "instagram", "status": "published", "platformPostUrl": "https://instagram.com/reel/x"}]}})
+        return httpx.Response(404)
+
+    f = tmp_path / "r.mp4"
+    f.write_bytes(b"REEL")
+    pub = ZernioPublisher("acc1", "instagram", api_key="sk_x", base_url="https://zernio.test/api/v1",
+                          transport=httpx.MockTransport(handler))
+    res = pub.publish_reel_file(f, "caption")
+    assert res["platform_id"] == "zernio:p1" and res["url"] == "https://instagram.com/reel/x"
+    assert [c[2].rsplit("/", 1)[-1] for c in calls] == ["presign", "1", "posts"]
+    assert calls[0][3] == "Bearer sk_x" and calls[1][3] is None   # the API key never goes to storage
+    assert pub.account_id == "zernio:acc1"

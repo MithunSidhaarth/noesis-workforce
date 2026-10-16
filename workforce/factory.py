@@ -69,14 +69,21 @@ def build_services(db: Database | None = None) -> Services:
             _configured(db, name, "credentials set; publishing disabled by policy until you enable it")
         else:
             set_integration_status(db, name, "not_configured", "")
-    from integrations.social.publishers import PostizPublisher
+    from integrations.social.publishers import PostizPublisher, ZernioPublisher
     from workforce.brands import load_brands
-    postiz = 0
+    postiz = zernio = 0
     for b in load_brands():
         for platform, ch in b["channels"].items():
-            if ch.get("postiz_integration"):
+            if ch.get("zernio_account"):
+                extra["publishers"][f"{platform}:{b['id']}"] = ZernioPublisher(str(ch["zernio_account"]), platform)
+                zernio += 1
+            elif ch.get("postiz_integration"):
                 extra["publishers"][f"{platform}:{b['id']}"] = PostizPublisher(str(ch["postiz_integration"]), platform)
                 postiz += 1
+    if zernio and os.environ.get("ZERNIO_API_KEY"):
+        _configured(db, "zernio", f"{zernio} account(s) in config/brands.yaml; not yet verified by a live call")
+    elif zernio:
+        set_integration_status(db, "zernio", "not_configured", "ZERNIO_API_KEY missing in .env")
     if postiz and os.environ.get("POSTIZ_API_KEY"):
         _configured(db, "postiz", f"{postiz} channel(s) in config/brands.yaml; not yet verified by a live call")
     elif postiz:

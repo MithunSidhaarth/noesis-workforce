@@ -1,6 +1,6 @@
 # Test report
 
-Run: `python -m pytest -q` → **93 passed** (2026-10-16, Python 3.12, SQLite WAL).
+Run: `python -m pytest -q` → **94 passed** (2026-10-16, Python 3.12, SQLite WAL).
 Lint: `ruff check --select F .` → clean. Dashboard: `npm run build` → passes.
 
 Automated tests use fakes for every outside service (`tests/helpers.py`:
@@ -17,7 +17,7 @@ prove that a real provider accepts the call.
 | owner loop (notifications, buttons, confirm/skip, profile, outcomes, housekeeping, reliability) | 21 |
 | security and policies | 18 |
 | specialists: LinkedIn video, Instagram reel upload | 2 |
-| brands, Postiz, idea scout, email applications, source filter (`test_brands_and_ideas.py`) | 9 |
+| brands, Postiz, idea scout, email applications, source filter, Zernio (`test_brands_and_ideas.py`) | 10 |
 
 ## The 24 acceptance criteria
 

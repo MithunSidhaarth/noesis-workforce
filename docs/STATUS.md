@@ -5,7 +5,7 @@ Last updated: 2026-10-16. Branch `main`.
 ## Summary
 
 All ten bots, the runtime, dashboard, Telegram command centre, policies and
-deployment are implemented and pass 93 automated tests. The Docker stack builds
+deployment are implemented and pass 94 automated tests. The Docker stack builds
 and runs healthy. **No outside service has been called live yet**, so every
 integration is "implemented, tested with fakes, waiting for your first real run".
 
@@ -32,7 +32,7 @@ integration is "implemented, tested with fakes, waiting for your first real run"
 - Brands: `config/brands.yaml` (cue.notch → LinkedIn, msthinks → Instagram).
   `/work <what you did>` and the Monday plan make one post per brand per
   channel, in that brand's voice and the platform's format; publishing through
-  Postiz (any number of accounts) or the direct LinkedIn/Instagram APIs
+  Zernio (free for 2 accounts), Postiz or the direct LinkedIn/Instagram APIs
   (LinkedIn video upload, Instagram reel upload without a public media host);
   post caps per account.
 - Daily project-idea scout (07:30): GitHub new repos, Hugging Face trending,

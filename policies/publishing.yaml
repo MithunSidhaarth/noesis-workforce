@@ -1,7 +1,7 @@
 # Automatic publishing policy (Content Studio). Starts DISABLED.
 version: 1
 enabled: false
-accounts_allowlist: []            # e.g. ["postiz:<channel id>", "linkedin:urn:li:person:XXXX", "instagram:1784..."]
+accounts_allowlist: []            # e.g. ["zernio:<account id>", "postiz:<channel id>", "linkedin:urn:li:person:XXXX", "instagram:1784..."]
 auto_categories:                  # categories that may auto-publish when every check passes
   - educational
   - project_update
