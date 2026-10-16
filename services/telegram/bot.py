@@ -124,8 +124,9 @@ def main() -> None:  # pragma: no cover - network loop
     s = get_settings()
     try:
         tg = TelegramClient(s.telegram_token, s.telegram_owner_id)
-    except IntegrationRevoked as e:
-        set_integration_status(db, "telegram", "not_configured", str(e))
+    except (IntegrationRevoked, ValueError) as e:
+        msg = "TELEGRAM_OWNER_ID must be your numeric Telegram user id" if isinstance(e, ValueError) else str(e)
+        set_integration_status(db, "telegram", "not_configured" if isinstance(e, IntegrationRevoked) else "error", msg)
         print(f"telegram disabled: {e}")
         while True:
             time.sleep(3600)

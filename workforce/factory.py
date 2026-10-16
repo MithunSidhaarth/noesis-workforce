@@ -30,7 +30,9 @@ def build_services(db: Database | None = None) -> Services:
     from integrations.web.fetcher import Fetcher
     extra["fetcher"] = Fetcher()
 
-    if s.telegram_token and s.telegram_owner_id:
+    if s.telegram_token and s.telegram_owner_id and not s.telegram_owner_id.strip().isdigit():
+        set_integration_status(db, "telegram", "error", "TELEGRAM_OWNER_ID must be your numeric Telegram user id")
+    elif s.telegram_token and s.telegram_owner_id:
         from integrations.telegram.client import TelegramClient
         extra["telegram"] = TelegramClient(s.telegram_token, s.telegram_owner_id)
         _configured(db, "telegram", "credentials set; not yet verified by a live call")

@@ -209,3 +209,14 @@ def test_secrets_are_redacted_from_logs_and_errors(env, services):
     assert tok not in env.db.scalar("SELECT message FROM exec_log ORDER BY id DESC LIMIT 1")
     configure_logging()
     assert logging.getLogger("httpx").level >= logging.WARNING
+
+
+def test_misconfigured_telegram_owner_id_does_not_crash_workers(env, monkeypatch):
+    from workforce.core.settings import reset_settings
+    from workforce.factory import build_services
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456789:" + "A" * 35)
+    monkeypatch.setenv("TELEGRAM_OWNER_ID", "@mithun")   # a username, not the numeric id
+    reset_settings()
+    s = build_services(env.db)
+    assert "telegram" not in s.extra
+    assert env.db.one("SELECT status FROM integrations WHERE name='telegram'")["status"] == "error"
