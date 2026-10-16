@@ -44,14 +44,14 @@ prove that a real provider accepts the call.
 | 21 | Recovers after a worker crash | `test_worker_crash_recovery`; also a real `docker kill` of the worker container, tasks resumed |
 | 22 | Every external action has an auditable result | `test_every_external_action_has_auditable_result` |
 | 23 | Usage budgets prevent unbounded model calls | `test_usage_budgets_prevent_unbounded_model_calls`, `test_daily_cap_defers_until_tomorrow` |
-| 24 | Deployment guide works from a clean environment | Manual: fresh clone → DEPLOYMENT.md steps 3–7 in Docker; first attempt found two `.env.example` bugs (fixed), second attempt passed; repeated after the latest changes: all 5 services healthy, worker ≈380 MB |
+| 24 | Deployment guide works from a clean environment | Manual: fresh clone → DEPLOYMENT.md steps 3–7 in Docker; first attempt found two `.env.example` bugs (fixed), second attempt passed; repeated after the latest changes: 4 services healthy plus Caddy running, worker ≈380 MB |
 
 (Exact test names: `grep -rn "def test_" tests/`.)
 
 ## Manual checks done in the build environment
 
-- Docker Compose stack built and started; `api`, `worker`, `scheduler`,
-  `telegram`, `caddy` healthchecks green; `noesisctl.py doctor` ran.
+- Docker Compose stack built and started; `api`, `worker`, `scheduler` and
+  `telegram` healthchecks green, `caddy` running (it has no healthcheck); `noesisctl.py doctor` ran.
 - A real FFmpeg reel (1080×1920) rendered and verified with ffprobe on the
   host. (The sandbox image used for the smoke test has no FFmpeg; the
   production `Dockerfile` installs it.)
