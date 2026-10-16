@@ -177,13 +177,10 @@ class Vault:
             target = self.resolve(rel_path)
             n = 2
             while target.exists():
-                head = target.read_text(encoding="utf-8")[:2000]
-                if f'generated_by: "{GENERATED_BY}"' not in head:
-                    # never touch a user-authored note; pick a sibling name
-                    target = target.with_name(f"{Path(rel_path).stem} ({n}).md")
-                    n += 1
-                else:
-                    raise VaultError(f"workforce note at {target} has a different key")
+                # never touch a user-authored note or another record's note
+                # (two openings can share a title); pick a sibling name
+                target = target.with_name(f"{Path(rel_path).stem} ({n}).md")
+                n += 1
         created = not target.exists()
         if not created:
             old = target.read_text(encoding="utf-8")

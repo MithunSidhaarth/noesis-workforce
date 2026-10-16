@@ -10,7 +10,7 @@ database. Read `docs/ARCHITECTURE.md` first, then `docs/STATUS.md`.
 ## Commands
 
 ```bash
-python -m pytest -q                       # all tests (103); must stay green
+python -m pytest -q                       # all tests (104); must stay green
 ruff check --select F .                   # unused imports / undefined names
 cd apps/dashboard && npm ci && npm run build   # dashboard static export
 python scripts/noesisctl.py doctor        # config + health check

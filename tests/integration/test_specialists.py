@@ -350,3 +350,12 @@ def test_linkedin_video_upload_parts_finalize_and_post(tmp_path):
     assert seen["finalize"]["finalizeUploadRequest"]["uploadedPartIds"] == ["e1", "e2"]
     assert seen["post"]["content"]["media"]["id"] == "urn:li:video:V1"
     assert pub.publish_text("hi")["platform_id"] == "urn:li:share:7"
+
+
+def test_two_records_with_the_same_title_get_separate_notes(env):
+    from integrations.obsidian.vault import Vault
+    v = Vault(env.vault)
+    a = v.upsert_note("opp:1", "09 Opportunities/2026-10 data-science.md", {"title": "a"}, "first", "test")
+    b = v.upsert_note("opp:2", "09 Opportunities/2026-10 data-science.md", {"title": "b"}, "second", "test")
+    assert a["path"] != b["path"] and b["path"].endswith("data-science (2).md")
+    assert "first" in (Path(env.vault) / a["path"]).read_text()

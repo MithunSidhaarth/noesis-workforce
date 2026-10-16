@@ -11,6 +11,8 @@ integration is "implemented, tested with fakes, waiting for your first real run"
 
 ## Works and is tested (automated)
 
+- Vault: two opportunities with the same title in the same month get separate notes (`… (2).md`) instead of failing `process_verification`.
+
 - Durable queue: leases, heartbeats, retries with backoff, dead-letter,
   idempotency, dependencies (`task_deps`), checkpoints, cancellation, crash and
   restart recovery, worker hand-back on shutdown.
