@@ -6,6 +6,11 @@ you have verified, plans and renders content, triages email into drafts, keeps
 reminders, files knowledge into your Obsidian vault, and reports to you on
 Telegram and a web dashboard.
 
+**v2.0** turns it into a Bengaluru internship engine: official company job
+boards, AI fit scores, tailored drafts with an ATS score and a one-page resume
+PDF, a found-to-offer pipeline with reminders and prep plans, your own custom
+Telegram agents, phone calls before interviews, and a one-VM Google Cloud deploy.
+
 It starts **safe**: dry-run on, publishing off, email send off, outreach off.
 Nothing leaves the server until you turn it on, and the risky actions still need
 your tap on an approval.
@@ -14,16 +19,18 @@ your tap on an approval.
 
 | Part | Where |
 |---|---|
+| Custom Telegram agents (one BotFather bot each, owner-only, fixed tool list) | `workforce/custom_agents.py`, `workforce/agents/custom_agent.py`, `services/agents/` |
+| Phone calls to you (Twilio/Telnyx, off by default, quiet hours) | `workforce/phone.py`, `policies/phone.yaml` |
 | Ten bots (Scout, Applications, Content Strategist, Content Studio, Communications, Outreach, Knowledge, Personal Ops, Quality, Chief of Staff) | `workforce/agents/`, `config/bots/*.yaml`, `prompts/` |
 | Durable queue, typed message bus (18 message types), scheduler | `workforce/core/queue.py`, `workforce/messaging/bus.py`, `workforce/scheduler.py` |
 | Policy engine, approvals, audit trail, idempotent external actions | `workforce/policies/engine.py`, `policies/*.yaml` |
 | Model router with budgets (works with **no** model configured) | `workforce/model_router/`, `config/models.yaml` |
 | Owner actions shared by Telegram, dashboard and CLI | `workforce/owner_actions.py` |
-| API + dashboard (17 pages, static export served by the API) | `services/api/`, `apps/dashboard/` |
+| API + dashboard (five main pages plus More, light/dark, phone layout; static export served by the API) | `services/api/`, `apps/dashboard/` |
 | Telegram command centre with buttons, owner-id only | `services/telegram/bot.py` |
 | Obsidian vault adapter (never overwrites your notes) | `integrations/obsidian/vault.py` |
-| Docker Compose deployment with Caddy HTTPS, backups | `docker-compose.yml`, `deploy/`, `scripts/` |
-| Tests (82, all passing) | `tests/` |
+| Docker Compose deployment with Caddy HTTPS, backups; or one GCP e2-micro with systemd | `docker-compose.yml`, `deploy/`, `deploy/gcp/`, `scripts/` |
+| Tests (175, all passing) | `tests/` |
 
 ## Quick start (local, no Docker)
 
@@ -31,13 +38,15 @@ your tap on an approval.
 python3.12 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env              # fill in what you have; blanks are fine
-python -m pytest -q               # 82 passed
+python -m pytest -q               # 175 passed
 python -m services.scheduler.main &        # migrates the DB, runs schedules + housekeeping
 python -m services.worker.main --shared &  # all bots in one process
+python -m services.agents.main &           # your custom agents' Telegram bots
 python -m uvicorn services.api.app:app --port 8000   # API (+ dashboard once built: cd apps/dashboard && npm ci && npm run build)
 ```
 
-For the real server, follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (12 steps), or
+For the real server, follow **[docs/GCP.md](docs/GCP.md)** (Google Cloud Always Free, recommended for v2.0),
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (12 steps), or
 **[docs/ORACLE.md](docs/ORACLE.md)** for the free Oracle Cloud option with no domain, or
 **[docs/WINDOWS.md](docs/WINDOWS.md)** to run it on your own PC.
 
@@ -58,6 +67,9 @@ For the real server, follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** (12 ste
 | Doc | What it covers |
 |---|---|
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | components, how work flows, design decisions |
+| [GCP](docs/GCP.md) | one e2-micro VM on Google Cloud, systemd, Tailscale, backups to Cloud Storage |
+| [AGENTS](docs/AGENTS.md) | make your own Telegram agents: BotFather, tools, schedules, voice notes |
+| [PHONE](docs/PHONE.md) | phone calls to you: Twilio/Telnyx setup, quiet hours, `/call test` |
 | [DEPLOYMENT](docs/DEPLOYMENT.md) | VPS setup from a clean machine, update, rollback |
 | [WINDOWS](docs/WINDOWS.md) | run it on your own PC with Docker Desktop, writing straight into your vault |
 | [ORACLE](docs/ORACLE.md) | €0 option: Oracle Cloud Always Free ARM machine, private mode over Tailscale |

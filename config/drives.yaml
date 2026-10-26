@@ -1,0 +1,48 @@
+# Yearly off-campus hiring programmes that Indian students can apply to.
+# Months are APPROXIMATE (when each usually opened in recent years) and change year to
+# year: the radar tells you when a window is near and, with watch: true, when the
+# official page changes. Always check the official page for dates and eligibility.
+# opens: months (1-12) the window has usually been open.
+drives:
+  - id: google_step
+    name: Google STEP Internship
+    organizer: Google
+    opens: [9, 10, 11]
+    eligibility: "1st / 2nd-year undergraduates in CS or related fields (check the current call)"
+    url: https://buildyourfuture.withgoogle.com/programs/step
+    watch: true
+  - id: microsoft_engage
+    name: Microsoft Engage (mentorship + internship track)
+    organizer: Microsoft
+    opens: [4, 5]
+    eligibility: "Pre-final-year engineering students in India; the programme has changed format over the years"
+    url: https://careers.microsoft.com/v2/global/en/students
+    watch: false
+  - id: amazon_wow
+    name: Amazon WoW (Women of the World) hiring
+    organizer: Amazon
+    opens: [7, 8]
+    eligibility: "Women engineering students in India, usually pre-final / final year"
+    url: https://www.amazon.jobs/en/teams/university-recruiting
+    watch: false
+  - id: flipkart_grid
+    name: Flipkart GRiD
+    organizer: Flipkart
+    opens: [6, 7, 8]
+    eligibility: "Engineering students in India (team challenge; top teams get interviews / PPIs)"
+    url: https://unstop.com/competitions?search=flipkart%20grid
+    watch: false
+  - id: jpmc_code_for_good
+    name: J.P. Morgan Code for Good
+    organizer: JPMorgan Chase
+    opens: [6, 7, 8]
+    eligibility: "Pre-final-year students; a hackathon that leads to internship interviews"
+    url: https://careers.jpmorgan.com/in/en/students/programs/code-for-good
+    watch: true
+  - id: goldman_sachs_india
+    name: Goldman Sachs India summer analyst (engineering)
+    organizer: Goldman Sachs
+    opens: [7, 8, 9]
+    eligibility: "Pre-final-year students; off-campus applications on the careers site"
+    url: https://www.goldmansachs.com/careers/students/programs-and-internships
+    watch: false

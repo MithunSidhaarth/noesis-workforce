@@ -63,6 +63,9 @@ class PolicyEngine:
             "calendar.send_invite": self._calendar_rule,
             "application.submit": self._application_rule,
             "outreach.send": self._outreach_rule,
+            "telegram.custom_agent_reply": self._owner_only_rule,
+            "phone.call_owner": self._phone_rule,
+            "calendar.owner_event": self._owner_calendar_rule,
         }
 
     def evaluate(self, req: ActionRequest, bot: BotConfig) -> PolicyDecision:
@@ -203,6 +206,43 @@ class PolicyEngine:
         if self._count_actions("outreach.send", self._day_start()) >= p.get("max_sends_per_day", 5):
             return self._cap("daily outreach cap reached", "outreach")
         return PolicyDecision(decision=Decision.allow, reasons=["outreach policy satisfied"], policy="outreach")
+
+
+    def _owner_only_rule(self, req: ActionRequest) -> PolicyDecision:
+        if req.target != "owner":
+            return PolicyDecision(decision=Decision.deny, reasons=["custom agents may only message the owner"], policy="global")
+        return PolicyDecision(decision=Decision.allow, reasons=["reply to the owner"], policy="global")
+
+    def _phone_rule(self, req: ActionRequest) -> PolicyDecision:
+        """Calls are time-sensitive, so a blocked call is not retried later: the caller
+        sends the alert on Telegram instead (no retry_at on any of these denials)."""
+        from ..notifications import in_quiet_hours
+        p = self.p.get("phone")
+        deny = lambda why: PolicyDecision(decision=Decision.deny, reasons=[why], policy="phone")  # noqa: E731
+        if req.target != "owner":
+            return deny("calls may only go to the owner")
+        if not p.get("enabled"):
+            return deny("phone calls are off (policies/phone.yaml enabled: false)")
+        reason = req.attributes.get("reason")
+        if not (p.get("call_for") or {}).get(reason):
+            return deny(f"calls for '{reason}' are not enabled in policies/phone.yaml")
+        if in_quiet_hours(spec=p.get("quiet_hours") or "off"):
+            return deny(f"quiet hours ({p.get('quiet_hours')})")
+        statuses = ("succeeded", "executing")
+        if self._count_actions("phone.call_owner", self._day_start(), statuses=statuses) >= int(p.get("max_calls_per_day", 3)):
+            return deny("daily call cap reached")
+        gap = float(p.get("min_gap_minutes", 30)) * 60
+        if gap and self._count_actions("phone.call_owner", now() - gap, statuses=statuses):
+            return deny(f"already called in the last {int(gap // 60)} minutes")
+        return PolicyDecision(decision=Decision.allow, reasons=["phone policy satisfied"], policy="phone")
+
+    def _owner_calendar_rule(self, req: ActionRequest) -> PolicyDecision:
+        p = self.p.get("calendar")
+        if not p.get("sync_enabled"):
+            return PolicyDecision(decision=Decision.deny, reasons=["calendar sync is off (policies/calendar.yaml)"], policy="calendar")
+        if req.params.get("attendees"):
+            return PolicyDecision(decision=Decision.deny, reasons=["owner calendar events never have guests"], policy="calendar")
+        return PolicyDecision(decision=Decision.allow, reasons=["calendar sync enabled"], policy="calendar")
 
 
 def _rule_matches(rule: dict, a: dict) -> bool:

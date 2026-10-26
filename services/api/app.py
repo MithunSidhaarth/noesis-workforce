@@ -524,7 +524,7 @@ def settings():
     st = SystemState(get_db())
     p = Policies()
     return {"paused": st.paused, "dry_run": st.dry_run,
-            "policies": {k: p.get(k) for k in ("global", "publishing", "email", "applications", "outreach")},
+            "policies": {k: p.get(k) for k in ("global", "publishing", "email", "applications", "outreach", "phone", "calendar")},
             "vault_path_configured": bool(os.environ.get("NOESIS_VAULT_PATH")),
             "schedules": rows("SELECT * FROM schedules ORDER BY bot_id", (), ("payload_json",))}
 
@@ -564,6 +564,12 @@ async def events(request: Request):
             yield f"data: {json.dumps(payload, default=str)}\n\n"
             await asyncio.sleep(2)
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ---- v2: internships, pipeline, boards, agents, resume, extras ------------
+from .v2 import router as v2_router  # noqa: E402
+
+app.include_router(v2_router, dependencies=[Owner])
 
 
 # ---- static dashboard ---------------------------------------------------

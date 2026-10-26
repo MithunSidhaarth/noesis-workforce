@@ -38,9 +38,24 @@ def build_services(db: Database | None = None) -> Services:
         _configured(db, "telegram", "credentials set; not yet verified by a live call")
     else:
         set_integration_status(db, "telegram", "not_configured", "TELEGRAM_BOT_TOKEN / TELEGRAM_OWNER_ID missing")
+    if s.telegram_owner_id and s.telegram_owner_id.strip().isdigit():
+        from integrations.telegram.custom import CustomBotSender
+        extra["custom_bots"] = CustomBotSender(db, s.telegram_owner_id)
+
+    from integrations.phone.client import PhoneClient
+    from .policies.engine import IntegrationRevoked
+    try:
+        phone = PhoneClient.from_env()
+    except IntegrationRevoked as e:
+        phone = None
+        set_integration_status(db, "phone", "error", str(e))
+    if phone is not None:
+        extra["phone"] = phone
+        _configured(db, "phone", f"{phone.provider}, calls go to {phone.masked_owner()}; off until policies/phone.yaml enabled: true")
+    elif not os.environ.get("CALLME_PHONE_PROVIDER"):
+        set_integration_status(db, "phone", "not_configured", "CALLME_* not set in .env (see docs/PHONE.md)")
 
     from integrations.ntfy.client import NtfyClient
-    from .policies.engine import IntegrationRevoked
     try:
         push = NtfyClient.from_env()
     except IntegrationRevoked as e:
@@ -116,4 +131,6 @@ def bootstrap(db: Database | None = None) -> Database:
     db.migrate()
     BotRegistry(db).sync()
     sync_sources(db)
+    from .custom_agents import ensure_builtin
+    ensure_builtin(db)
     return db

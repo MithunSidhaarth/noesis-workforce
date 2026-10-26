@@ -7,7 +7,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T = any>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; form?: FormData }): Promise<T> {
   const method = init?.method ?? "GET";
   const res = await fetch(`/api${path}`, {
     method,
@@ -16,7 +16,7 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
       ...(method !== "GET" ? { "X-Noesis-Request": "1" } : {}),
       ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
-    body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+    body: init?.form ?? (init?.body !== undefined ? JSON.stringify(init.body) : undefined),
   });
   if (res.status === 401 && typeof window !== "undefined" && !location.pathname.startsWith("/login")) {
     location.href = "/login";
@@ -33,6 +33,13 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
 }
 
 export const post = <T = any>(path: string, body?: unknown) => api<T>(path, { method: "POST", body: body ?? {} });
+export const patch = <T = any>(path: string, body: unknown) => api<T>(path, { method: "PATCH", body });
+export const del = <T = any>(path: string) => api<T>(path, { method: "DELETE" });
+export const upload = <T = any>(path: string, file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  return api<T>(path, { method: "POST", form });
+};
 
 /** Live event stream shared by every page (one EventSource per tab). */
 type Live = { logs: any[]; audit: any[]; queue: Record<string, number>; bots: any[]; approvals: number };

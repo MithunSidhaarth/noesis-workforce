@@ -1,0 +1,14 @@
+[Unit]
+Description=NOESIS nightly backup (SQLite snapshot + config) to local disk and Google Cloud Storage
+
+[Service]
+Type=oneshot
+User=noesis
+Group=noesis
+WorkingDirectory=/opt/noesis
+EnvironmentFile=/opt/noesis/.env
+Environment=PATH=/opt/noesis/.venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/noesis/deploy/gcp/backup.sh
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=200M

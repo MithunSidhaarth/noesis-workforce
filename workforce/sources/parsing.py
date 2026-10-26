@@ -56,6 +56,8 @@ MATERIALS = ["resume", "cv", "cover letter", "statement of purpose", "sop", "tra
 def clean_text(s: str | None) -> str:
     if not s:
         return ""
+    if "&lt;" in s:
+        s = html.unescape(s)   # Greenhouse `content` is HTML-escaped HTML
     txt = BeautifulSoup(s, "html.parser").get_text(" ") if "<" in s else s
     return re.sub(r"\s+", " ", html.unescape(txt)).strip()
 
@@ -89,8 +91,8 @@ def classify_type(text: str, default: str | None = None) -> str:
     return default or "unknown"
 
 
-def remote_status(text: str) -> str:
-    low = text.lower()
+def remote_status(text: str, location: str | None = None) -> str:
+    low = f"{location or ''} {text}".lower() if location else text.lower()
     has_remote = any(k in low for k in ("remote", "online", "virtual", "work from home", "wfh"))
     has_onsite = any(k in low for k in ("in-person", "in person", "on-site", "onsite", "offline", "venue"))
     if "hybrid" in low or (has_remote and has_onsite):
@@ -146,6 +148,21 @@ def extract_materials(text: str) -> list[str]:
         if re.search(rf"\b{re.escape(m)}\b", low) and m not in found:
             found.append(m)
     return found
+
+
+STIPEND_RE = re.compile(
+    r"(?:stipend|salary|compensation|pay)[^.\n]{0,25}?((?:₹|rs\.?|inr|\$|usd)\s*[\d,]+(?:\.\d+)?\s*(?:k|lpa|lakhs?|l)?"
+    r"(?:\s*(?:-|–|to)\s*(?:₹|rs\.?|inr|\$)?\s*[\d,]+(?:\.\d+)?\s*(?:k|lpa|lakhs?|l)?)?"
+    r"(?:\s*(?:/|per|a)\s*(?:month|mo|week|year|annum|yr))?)"
+    r"|((?:₹|rs\.?|inr)\s*[\d,]+(?:\.\d+)?\s*(?:k)?\s*(?:/|per)\s*(?:month|mo))", re.IGNORECASE)
+
+
+def extract_stipend(text: str) -> str | None:
+    """The stipend exactly as the listing states it ("₹40,000/month"); None when not stated."""
+    m = STIPEND_RE.search(text or "")
+    if not m:
+        return None
+    return re.sub(r"\s+", " ", (m.group(1) or m.group(2)).strip())[:80]
 
 
 NOT_OFFICIAL = ("twitter.com", "x.com", "facebook.com", "instagram.com", "linkedin.com", "t.me", "wa.me", "whatsapp.com",
@@ -226,19 +243,73 @@ def _path(d: Any, path: str) -> Any:
     return d
 
 
+def flatten(v: Any) -> str:
+    """Lists and dicts from JSON APIs as one readable string: ["Bengaluru", "Remote"] -> "Bengaluru, Remote"."""
+    if v is None:
+        return ""
+    if isinstance(v, (list, tuple)):
+        return ", ".join(s for s in (flatten(x) for x in v) if s)
+    if isinstance(v, dict):
+        return ", ".join(s for s in (flatten(x) for x in v.values()) if s)
+    return str(v)
+
+
+def word_rx(words: list[str]) -> re.Pattern:
+    """Whole-word, case-insensitive: 'intern' matches "Intern," but not 'internal' or 'international'."""
+    alts = "|".join(re.escape(w.lower()) for w in words if w)
+    return re.compile(rf"(?<![a-z0-9])(?:{alts})(?![a-z0-9])", re.IGNORECASE)
+
+
+def to_epoch(v: Any) -> float | None:
+    """Numeric epochs (seconds, or milliseconds as Lever sends them) and ISO dates."""
+    if v in (None, ""):
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)) or (isinstance(v, str) and re.fullmatch(r"\d{9,14}(\.\d+)?", v.strip())):
+        x = float(v)
+        return x / 1000 if x > 1e12 else x
+    try:
+        d = dateparser.parse(str(v))
+    except (ValueError, OverflowError):
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=ZoneInfo("UTC"))
+    return d.timestamp()
+
+
+def json_rows(data: Any, cfg: dict) -> list:
+    """Apply the row-level options before building items, so a 13 MB list is cut down first."""
+    rows = _path(data, cfg["items"]) if cfg.get("items") else data
+    rows = rows if isinstance(rows, list) else []
+    where = cfg.get("where") or {}
+    if where:
+        rows = [r for r in rows if all(_path(r, k) == v for k, v in where.items())]
+    for path, words in (cfg.get("match_any") or {}).items():
+        rx = word_rx(words if isinstance(words, list) else [words])
+        rows = [r for r in rows if rx.search(flatten(_path(r, path)))]
+    if cfg.get("sort_desc"):
+        rows = sorted(rows, key=lambda r: to_epoch(_path(r, cfg["sort_desc"])) or 0, reverse=True)
+    return rows
+
+
 def parse_json(content: bytes, base_url: str, cfg: dict) -> list[dict]:
     data = json.loads(content)
-    rows = _path(data, cfg["items"]) if cfg.get("items") else data
+    rows = json_rows(data, cfg)
+    del data   # big feeds (SimplifyJobs is ~13 MB): keep only the filtered rows in memory
+    f = cfg.get("fields", {})
     out = []
-    for r in rows or []:
-        f = cfg.get("fields", {})
+    for r in rows:
         title = _path(r, f.get("title", "title"))
         url = _path(r, f.get("url", "url"))
-        body_parts = [str(_path(r, p) or "") for p in f.get("body", [])]
+        body_parts = [flatten(_path(r, p)) for p in f.get("body", [])]
         deadline_raw = _path(r, f["deadline"]) if f.get("deadline") else None
-        out.append({"title": clean_text(str(title or "")), "url": urljoin(base_url, url) if url else None,
-                    "body": clean_text(" ".join(body_parts)), "published": None,
-                    "author": clean_text(str(_path(r, f["organizer"]) or "")) if f.get("organizer") else None,
+        organizer = cfg.get("organizer_name") or (clean_text(flatten(_path(r, f["organizer"]))) if f.get("organizer") else None)
+        out.append({"title": clean_text(flatten(title)), "url": urljoin(base_url, url) if isinstance(url, str) and url else None,
+                    "body": clean_text(" ".join(p for p in body_parts if p)),
+                    "published": to_epoch(_path(r, f["published"])) if f.get("published") else None,
+                    "author": organizer or None,
+                    "location": clean_text(flatten(_path(r, f["location"])))[:300] or None if f.get("location") else None,
                     "tags": [], "structured_deadline": deadline_raw})
     return out
 
@@ -270,14 +341,16 @@ def normalize_item(item: dict, source: dict, default_tz: str) -> dict | None:
     typ = classify_type(f"{title} {' '.join(item.get('tags', []))}")
     if typ == "unknown":
         typ = classify_type(text, source.get("default_type"))
+    location = item.get("location") or None
+    organizer = source.get("organizer_name") or (item.get("author") if source.get("author_is_organizer") else None)
     return {
         "title": title[:300],
-        "organizer": item.get("author") if source.get("author_is_organizer") else None,
+        "organizer": organizer,
         "official_url": url,
         "discovery_url": url,
         "type": typ,
-        "location": None,
-        "remote_status": remote_status(text),
+        "location": location,
+        "remote_status": remote_status(text, location),
         "deadline": deadline,
         "deadline_text": deadline_text,
         "deadline_tz": tz,
@@ -285,6 +358,7 @@ def normalize_item(item: dict, source: dict, default_tz: str) -> dict | None:
         "required_materials": extract_materials(text),
         "summary": (item.get("body") or "")[:600],
         "published": item.get("published"),
+        "stipend": extract_stipend(text),
         "raw_text": text[:8000],
         "candidate_links": candidate_official_links(item.get("links", []), url),
     }

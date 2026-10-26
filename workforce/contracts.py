@@ -75,6 +75,11 @@ class ModelPreference(BaseModel):
     allowed_tiers: list[Literal["none", "cheap", "standard", "premium"]] = Field(default_factory=lambda: ["none", "cheap"])
     daily_budget_usd: float = Field(0.0, ge=0)
     daily_call_limit: int = Field(50, ge=0)
+    # providers tried first, in this order (others follow in models.yaml order); bulk bots
+    # put the free Gemini tier first so the subscription is kept for writing
+    provider_order: list[str] = Field(default_factory=list)
+    # models of this tier are tried first (custom agents set it from their cheap / standard choice)
+    prefer_tier: str | None = None
 
 
 class BotConfig(BaseModel):

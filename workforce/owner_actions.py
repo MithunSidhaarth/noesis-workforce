@@ -91,7 +91,8 @@ def _resolve(db: Database, table: str, token: str, listing_key: str | None = Non
     if not token:
         raise OwnerActionError("Which one? Add the number from the list or the 6-character ref, "
                                f"e.g. {'/approve 1' if table == 'approvals' else '/opp 1'}.")
-    if listing_key and token.isdigit():
+    # a 6-character ref can be all digits; list numbers are short
+    if listing_key and token.isdigit() and len(token) < 6:
         ids = loads(db.scalar("SELECT value FROM system_state WHERE key=?", (listing_key,)), [])
         n = int(token)
         if 1 <= n <= len(ids):
@@ -180,12 +181,24 @@ def opportunity_card(opp: dict, short: bool = False) -> tuple[str, list]:
         lines = [head, "", clip(opp["title"], 200)]
     else:
         lines = [f"🎯 {clip(opp['title'], 120)}", ""]
-    lines += [f"{kind.capitalize()} · {closes_in(deadline)}",
+    where = " · ".join(x for x in (opp.get("organizer"), opp.get("location"), opp.get("stipend")) if x)
+    lines += ([where] if where else []) + [f"{kind.capitalize()} · {closes_in(deadline)}",
               f"Who can apply: {who}",
               match,
-              f"Status: {plain_status(opp)}",
-              opp.get("official_url") or "The listing has no link."]
+              f"Status: {plain_status(opp)}"]
+    reasons = loads(opp.get("ai_reasons_json"), [])
+    flags = loads(opp.get("ai_red_flags_json"), [])
+    if reasons:
+        lines.append("Why it fits: " + "; ".join(clip(r, 80) for r in reasons[:3]))
+    if flags:
+        lines.append("Watch out: " + "; ".join(clip(r, 80) for r in flags[:3]))
+    if (opp.get("ghost_risk") or 0) >= 0.3:
+        lines.append("👻 May be a ghost listing: " + "; ".join(loads(opp.get("ghost_reasons_json"), [])[:2]))
+    lines.append(opp.get("official_url") or "The listing has no link.")
     if not short:
+        if opp.get("stage") and opp["stage"] != "found":
+            from .pipeline import LABELS
+            lines.append(f"Stage: {LABELS.get(opp['stage'], opp['stage'])}")
         if opp.get("relevance_rationale"):
             lines.append(f"Why it matches: {opp['relevance_rationale']}")
         cands = candidate_links(opp)
@@ -258,6 +271,7 @@ def confirm_opportunity(db: Database, token: str, by: str, url: str | None = Non
                "verification_notes_json=?, last_verified=?, application_status=CASE WHEN application_status='DISCOVERED' "
                "THEN 'VERIFIED' ELSE application_status END WHERE id=?", (by, url, dumps(notes), now(), opp["id"]))
     audit(db, by, "opportunity.confirmed", None, {"opportunity_id": opp["id"], "url": url})
+    _advance(db, opp["id"], "preparing", by, "you confirmed it")
     opp = db.one("SELECT * FROM opportunities WHERE id=?", (opp["id"],))
     schedule_deadline_reminders(db, opp, by)
     try:
@@ -278,6 +292,7 @@ def skip_opportunity(db: Database, token: str, by: str, reason: str = "") -> dic
                (now(), opp["id"]))
     cancel_opportunity_reminders(db, opp["id"])
     audit(db, by, "opportunity.skipped", None, {"opportunity_id": opp["id"], "reason": reason})
+    _advance(db, opp["id"], "skipped", by, reason, force=True)
     return db.one("SELECT * FROM opportunities WHERE id=?", (opp["id"],))
 
 
@@ -301,6 +316,7 @@ def record_outcome(db: Database, token: str, outcome: str, by: str) -> dict:
     db.execute("UPDATE opportunities SET application_status='CLOSED' WHERE id=?", (app["opportunity_id"],))
     cancel_opportunity_reminders(db, app["opportunity_id"])
     audit(db, by, "application.outcome", None, {"application_id": app["id"], "outcome": outcome})
+    _advance(db, app["opportunity_id"], OUTCOME_STAGE[outcome], by, f"outcome {outcome}", force=True)
     return db.one("SELECT * FROM applications WHERE id=?", (app["id"],))
 
 
@@ -314,7 +330,88 @@ def record_submission(db: Database, token: str, confirmation: str, by: str) -> d
     except ValueError as e:
         raise OwnerActionError(f"I can't record that as submitted yet ({e}). Check where it stands with /opp {ref(app['opportunity_id'])}.") from e
     cancel_opportunity_reminders(db, app["opportunity_id"])
+    _advance(db, app["opportunity_id"], "applied", by, f"submitted: {confirmation.strip()[:100]}")
     return out
+
+
+OUTCOME_STAGE = {"accepted": "offer", "rejected": "rejected", "no_response": "ghosted", "withdrawn": "withdrawn"}
+
+
+def _advance(db: Database, opp_id: str, stage: str, by: str, note: str, force: bool = False) -> None:
+    """Move the pipeline forward as a side effect of another owner action. Never moves a
+    listing backwards (confirming something already at an interview leaves it there)."""
+    from .pipeline import STAGES, set_stage
+    cur = db.scalar("SELECT stage FROM opportunities WHERE id=?", (opp_id,))
+    if cur is None or cur == stage:
+        return
+    if force or STAGES.index(stage) > STAGES.index(cur):
+        set_stage(db, opp_id, stage, by=by, note=note)
+
+
+def change_stage(db: Database, text: str, by: str) -> dict:
+    """'/stage <ref> <stage> [YYYY-MM-DD HH:MM] [note]'. The OA / interview time, when given,
+    feeds reminders, prep and the calendar."""
+    from .pipeline import LABELS, StageError, set_stage
+    parts = (text or "").split()
+    if len(parts) < 2:
+        raise OwnerActionError("Use /stage <ref> <stage>, e.g. /stage 3f9a1c interview_1 2026-11-04 15:00. "
+                               "Stages: shortlisted, preparing, applied, oa, interview_1, interview_2, hr, offer, rejected, ghosted, withdrawn.")
+    opp = find_opportunity(db, parts[0])
+    event_at, rest = None, parts[2:]
+    if len(rest) >= 2 and re.match(r"^\d{4}-\d{2}-\d{2}$", rest[0]) and re.match(r"^\d{1,2}:\d{2}$", rest[1]):
+        event_at, _ = parse_when(f"{rest[0]} {rest[1]} x")
+        rest = rest[2:]
+    try:
+        out = set_stage(db, opp["id"], parts[1], by=by, note=" ".join(rest), event_at=event_at)
+    except StageError as e:
+        raise OwnerActionError(str(e)) from e
+    if out["stage"] in ("online_assessment", "interview_1", "interview_2", "hr"):
+        schedule_stage_followups(db, out, by)
+    return {"opportunity": out, "label": LABELS[out["stage"]], "event_at": event_at}
+
+
+def schedule_stage_followups(db: Database, opp: dict, by: str) -> int:
+    """Reminders before an OA / interview (24 h and 1 h before) and a prep task for the coach."""
+    n = 0
+    ev = opp.get("next_event_at")
+    if ev:
+        for hours in (24, 1):
+            due = ev - hours * 3600
+            if due <= now():
+                continue
+            title = (f"{opp['stage'].replace('_', ' ').replace('online assessment', 'Online assessment')} for "
+                     f"“{clip(opp['title'], 70)}” {('in ' + plural(hours, 'hour')) if hours < 24 else 'tomorrow'}, "
+                     f"{when_label(ev)}. {opp.get('official_url') or ''}").strip()
+            cur = db.execute("INSERT OR IGNORE INTO reminders(id, title, due_at, source, ref_id, dedupe_key, created_at) "
+                             "VALUES (?,?,?,?,?,?,?)", (new_id("rem"), title, due, by, opp["id"],
+                                                        f"stage:{opp['id']}:{opp['stage']}:{int(ev)}:{hours}", now()))
+            n += cur.rowcount
+    try:
+        TaskQueue(db).enqueue(TaskSpec(bot_id="applications", kind="prepare_stage", payload={"opportunity_id": opp["id"]},
+                                       requested_by=by, idempotency_key=f"prep:{opp['id']}:{opp['stage']}"))
+    except BotDisabled:
+        pass
+    return n
+
+
+def add_link(db: Database, text: str, by: str) -> dict:
+    """'/add <link> [pasted description]': a posting from Internshala, Unstop, Wellfound, LinkedIn,
+    a careers page... LinkedIn is never fetched (CLAUDE.md), so it needs the pasted text."""
+    from .sources.parsing import domain
+    url, _, pasted = (text or "").strip().partition(" ")
+    url = _safe_url(url) if url else None
+    if not url:
+        raise OwnerActionError("Send the posting's link, e.g. /add https://internshala.com/internship/detail/... "
+                               "You can paste the description after the link.")
+    d = domain(url)
+    if (d == "linkedin.com" or d.endswith(".linkedin.com")) and len(pasted.strip()) < 80:
+        raise OwnerActionError("I don't open LinkedIn pages (their terms forbid it). Copy the job description and send "
+                               "/add <link> <the description> in one message.")
+    _, created = TaskQueue(db).enqueue(TaskSpec(bot_id="opportunity_scout", kind="ingest_link",
+                                                payload={"url": url, "text": pasted.strip()[:20000]}, requested_by=by,
+                                                idempotency_key=f"link:{sha(url)[:20]}:{int(now() // 600)}"))
+    audit(db, by, "opportunity.link_added", None, {"url": url})
+    return {"url": url, "queued": created, "pasted": bool(pasted.strip())}
 
 
 # ---- approvals -----------------------------------------------------------------

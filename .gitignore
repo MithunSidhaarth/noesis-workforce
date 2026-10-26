@@ -16,3 +16,5 @@ config/profile.yaml
 backups/
 *.log
 .previous-commit
+.venv/
+.ruff_cache/

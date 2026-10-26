@@ -1,57 +1,149 @@
 # Opportunity source registry. Each source documents how it is accessed.
-# Only public syndication feeds (RSS/Atom) are enabled by default: they are
-# published for automated reading. HTML sources are disabled until you have
+# Enabled by default: official job-board APIs and public syndication feeds, which
+# are published for automated reading. HTML sources stay disabled until you have
 # checked the site's terms and robots.txt allow it.
 #
-# NOTE: these feeds could not be fetched from the cloud build environment
-# (outbound network restricted there). Verify each from your VPS with
-#   python -m scripts.check_sources
+# Verify everything from the server with:
+#   python scripts/check_sources.py            (enabled sources)
+#   python scripts/check_sources.py --all      (include disabled ones)
+#   python scripts/check_sources.py --probe "Razorpay"   (find a company's ATS + slug)
+# The cloud build environment could not reach these hosts, so the counts in the
+# comments come from the owner's check on 26 Oct 2026, not from CI.
+
+# ---- company job boards (Greenhouse / Lever / Ashby official JSON APIs) -------
+# One line per company. Each expands into a source that keeps only internship /
+# trainee roles located in Bengaluru, India or remote, checked every 6 hours, and
+# marked official (the ATS host and the company domain are official domains).
+# Add or remove boards from the dashboard (Settings → Company boards) as well.
+company_boards:
+  # confirmed returning valid JSON on 26 Oct 2026
+  - {company: Meesho, ats: lever, slug: meesho, domain: meesho.com}
+  - {company: CRED, ats: lever, slug: cred, domain: cred.club}
+  - {company: Zeta, ats: lever, slug: zeta, domain: zeta.tech}
+  - {company: Databricks, ats: greenhouse, slug: databricks, domain: databricks.com}
+  - {company: Stripe, ats: greenhouse, slug: stripe, domain: stripe.com}
+  - {company: Rubrik, ats: greenhouse, slug: rubrik, domain: rubrik.com}
+  - {company: MongoDB, ats: greenhouse, slug: mongodb, domain: mongodb.com}
+  - {company: Sarvam AI, ats: ashby, slug: sarvam, domain: sarvam.ai}
+  - {company: Atlan, ats: ashby, slug: atlan, domain: atlan.com}
+  # Not added because the slug returned a client error on 26 Oct 2026 (wrong slug or a
+  # different ATS): Razorpay (lever), Groww (lever), Postman (greenhouse), PhonePe
+  # (greenhouse), Zepto (ashby). Find the right one with `check_sources.py --probe <name>`,
+  # then add it here or in the dashboard. Companies on Workday or their own careers site
+  # are listed in docs/SOURCES.md: send their links to the bot with /add instead.
+
 sources:
-  - id: opportunity_desk
-    name: Opportunity Desk
-    kind: rss
-    url: https://www.opportunitydesk.org/feed/
-    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
+  # ---- SimplifyJobs internship list, India filter ----------------------------
+  # Public GitHub file (~13 MB, ~17k rows). Kept: active + visible rows whose locations
+  # mention India / Bengaluru / Bangalore. Few rows match (1 active India row in a
+  # 26 Oct 2026 snapshot), but it costs one request every 6 hours.
+  - id: simplify_internships_india
+    name: SimplifyJobs internships (India)
+    kind: json
+    url: https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/.github/scripts/listings.json
+    access_method: "Public JSON file in a public GitHub repository (raw.githubusercontent.com), one request per interval"
     interval: 6h
-    default_type: fellowship
-    official_domains: []          # aggregator: links point at its own articles, official page needs confirmation
+    default_type: internship
+    official_domains: []            # links point at each company's own ATS; Quality checks them
+    parser:
+      where: {active: true, is_visible: true}
+      match_any: {locations: [india, bengaluru, bangalore, remote in india]}
+      sort_desc: date_posted
+      max_bytes: 20000000
+      fields:
+        title: title
+        url: url
+        organizer: company_name
+        location: locations
+        published: date_posted
+        body: [category, terms, locations, sponsorship]   # degrees left out: "PhD" in a list of accepted degrees is not "PhD only"
+    author_is_organizer: true
     enabled: true
-  - id: scholars4dev
-    name: Scholars4Dev
+
+  # ---- Google News RSS, Bengaluru internship queries ---------------------------
+  - id: google_news_internships_blr
+    name: Google News · internships Bengaluru
     kind: rss
-    url: https://www.scholars4dev.com/feed/
-    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
-    interval: 12h
-    default_type: scholarship
-    official_domains: []
-    enabled: true
-  - id: opportunities_circle
-    name: Opportunities Circle
-    kind: rss
-    url: https://opportunitiescircle.com/feed/
-    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
-    interval: 12h
-    default_type: fellowship
-    official_domains: []
-    enabled: true
-  - id: google_news_hackathons_india
-    name: Google News · hackathons India
-    kind: rss
-    url: "https://news.google.com/rss/search?q=hackathon+registration+India&hl=en-IN&gl=IN&ceid=IN:en"
-    access_method: "Google News RSS search feed (public syndication endpoint)"
-    interval: 12h
-    default_type: hackathon
-    official_domains: []
-    enabled: true
-  - id: google_news_internships_india
-    name: Google News · AI internships India
-    kind: rss
-    url: "https://news.google.com/rss/search?q=AI+internship+applications+open+India&hl=en-IN&gl=IN&ceid=IN:en"
+    url: "https://news.google.com/rss/search?q=%22internship%22+Bengaluru+OR+Bangalore+applications+open&hl=en-IN&gl=IN&ceid=IN:en"
     access_method: "Google News RSS search feed (public syndication endpoint)"
     interval: 12h
     default_type: internship
     official_domains: []
     enabled: true
+  - id: google_news_internships_india
+    name: Google News · AI/ML/SDE internships India
+    kind: rss
+    url: "https://news.google.com/rss/search?q=(AI+OR+ML+OR+SDE+OR+%22software+engineering%22)+internship+2027+India&hl=en-IN&gl=IN&ceid=IN:en"
+    access_method: "Google News RSS search feed (public syndication endpoint)"
+    interval: 12h
+    default_type: internship
+    official_domains: []
+    enabled: true
+  - id: google_news_hackathons_india
+    name: Google News · hackathons Bengaluru
+    kind: rss
+    url: "https://news.google.com/rss/search?q=hackathon+registration+Bengaluru+OR+Bangalore&hl=en-IN&gl=IN&ceid=IN:en"
+    access_method: "Google News RSS search feed (public syndication endpoint)"
+    interval: 12h
+    default_type: hackathon
+    official_domains: []
+    enabled: true
+
+  # ---- India student platforms: NO public API or feed ------------------------
+  # Internshala and Unstop have no official API/feed and their terms forbid automated
+  # collection, so they are never fetched automatically (CLAUDE.md: never bypass
+  # anti-automation). Send a posting's link instead: Telegram `/add <link>` or the
+  # dashboard "Add a link" box. The single page is fetched once, politely.
+  - id: internshala
+    name: Internshala (manual links only)
+    kind: html
+    url: https://internshala.com/internships/
+    access_method: "DISABLED: no public API/feed; terms forbid scraping. Use /add <link> for single postings"
+    interval: 1d
+    default_type: internship
+    official_domains: []
+    parser: {item: ".none"}
+    enabled: false
+  - id: unstop
+    name: Unstop (manual links only)
+    kind: html
+    url: https://unstop.com/internships
+    access_method: "DISABLED: no public API/feed; terms forbid scraping. Use /add <link> for single postings"
+    interval: 1d
+    default_type: internship
+    official_domains: []
+    parser: {item: ".none"}
+    enabled: false
+
+  # ---- scholarship / fellowship blogs: off by default (internships come first) ---
+  - id: opportunity_desk
+    name: Opportunity Desk
+    kind: rss
+    url: https://www.opportunitydesk.org/feed/
+    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
+    interval: 1d
+    default_type: fellowship
+    official_domains: []
+    parser: {include_any: [india, bengaluru, intern, internship, global, online]}
+    enabled: false
+  - id: scholars4dev
+    name: Scholars4Dev
+    kind: rss
+    url: https://www.scholars4dev.com/feed/
+    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
+    interval: 1d
+    default_type: scholarship
+    official_domains: []
+    enabled: false
+  - id: opportunities_circle
+    name: Opportunities Circle
+    kind: rss
+    url: https://opportunitiescircle.com/feed/
+    access_method: "Public WordPress RSS feed (syndication), conditional GET, robots.txt honored"
+    interval: 1d
+    default_type: fellowship
+    official_domains: []
+    enabled: false
   - id: mlh_events
     name: Major League Hacking events
     kind: html

@@ -5,12 +5,12 @@ Guidance for Claude (or any coding agent) working in this repository.
 ## What this is
 
 NOESIS Workforce: a private, single-owner system of ten bots on one SQLite
-database. Read `docs/ARCHITECTURE.md` first, then `docs/STATUS.md`.
+database, plus custom Telegram agents the owner creates. Read `docs/ARCHITECTURE.md` first, then `docs/STATUS.md`.
 
 ## Commands
 
 ```bash
-python -m pytest -q                       # all tests (104); must stay green
+python -m pytest -q                       # all tests (175); must stay green
 ruff check --select F .                   # unused imports / undefined names
 cd apps/dashboard && npm ci && npm run build   # dashboard static export
 python scripts/noesisctl.py doctor        # config + health check
@@ -52,4 +52,16 @@ docker compose up -d --build              # full stack
   `integrations/video/cue_reel.py` renders new ones from `assets/`.
 - Brands/accounts live in `config/brands.yaml` (`workforce/brands.py`); publishers
   are keyed `platform:brand` in the factory, with `platform` as the fallback.
+- Custom agents: tools come only from `TOOLS` in `workforce/custom_agents.py`
+  and the agent's own `tools` list; anything else is refused and audited. Tokens
+  are Fernet-encrypted (`workforce/secrets.py`); only `CustomBotSender` and the
+  `services/agents` poller decrypt them. Never accept the main bot token.
+- Phone calls go through `workforce/phone.call_owner` (action `phone.call_owner`,
+  rules in `policies/phone.yaml`); the number dialled is always
+  `CALLME_USER_PHONE_NUMBER`. A denied call falls back to Telegram, never retries.
+- Calendar writes go through `calendar.owner_event` (`policies/calendar.yaml`),
+  own calendar only, never attendees.
+- Dashboard v2 endpoints live in `services/api/v2.py` (owner-only router).
+- GCP deploy lives in `deploy/gcp/`; keep its systemd units in step with
+  `docker-compose.yml` when a service is added.
 - After each phase of work, update `docs/STATUS.md` and this file.

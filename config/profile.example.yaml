@@ -15,6 +15,17 @@ facts:
   citizenship:     {value: "", verified: false}   # e.g. "India"
   location:        {value: "", verified: false}   # e.g. "Bengaluru, India"
   age:             {value: "", verified: false}
+  college:         {value: "", verified: false}   # e.g. "BMS College of Engineering, Bengaluru"
+  cgpa:            {value: "", verified: false}   # e.g. "8.7 / 10"
+  skills:          {value: "", verified: false}   # e.g. "Python, PyTorch, FastAPI, React, SQL"
+  target_roles:    {value: "", verified: false}   # e.g. "SDE intern, ML intern, data intern"
+  target_season:   {value: "", verified: false}   # e.g. "Summer 2027" or "Jan–Jun 2027 (6-month)"
+  available_from:  {value: "", verified: false}   # e.g. "2027-01-05"
+  duration_months: {value: "", verified: false}   # e.g. 6
+  stipend_min:     {value: "", verified: false}   # e.g. "₹20,000/month"
+  github:          {value: "", verified: false}   # https://github.com/...
+  linkedin:        {value: "", verified: false}   # https://www.linkedin.com/in/... (you open LinkedIn; NOESIS never scrapes it)
+  portfolio:       {value: "", verified: false}
   # date_of_birth: {value: "", verified: false, sensitive: true}
 
 answers:
@@ -23,16 +34,23 @@ answers:
 
 documents: {}
 #  resume: {path: "documents/resume.pdf", verified: true}
+# Or upload the resume in the dashboard (Settings → Resume): its text is used for
+# ATS keyword scores and tailored bullets (only lines that are in your resume).
 
 # Relevance scoring (not used as application facts).
-interests: [ai, machine learning, agents, llm, software engineering, hackathon, startup, research, open source]
+interests: [python, ml, machine learning, ai, llm, agents, backend, frontend, full stack, data, sde, software engineering]
 idea_scout:                       # daily trending project ideas (GitHub, Hugging Face, Show HN, arXiv)
   days: 3                         # look-back window; the scout runs every morning
   github_topics: [llm, agents, rag]
   arxiv_categories: [cs.AI, cs.CL, cs.LG]
-preferred_types: [hackathon, fellowship, internship, grant, competition, scholarship, conference]
-preferred_locations: [india, bengaluru, bangalore, remote, online, global]
-exclude_keywords: [phd only, postdoc, senior, 10+ years]
+preferred_types: [internship, hackathon, competition, fellowship]
+preferred_locations: [bengaluru, bangalore, karnataka, india, remote, hybrid]
+exclude_keywords: [phd, postdoc, senior, staff engineer, 10+ years, us work authorization required, must be enrolled in a us,
+                   authorized to work in the united states]
+
+# Daily applying habit: the morning brief lists this many best matches to apply to,
+# and the dashboard keeps your streak (days you hit the quota).
+daily_apply_quota: 3
 
 # How often you hear from the workforce on Telegram.
 notifications:

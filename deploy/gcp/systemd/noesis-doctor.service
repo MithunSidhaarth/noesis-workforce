@@ -1,0 +1,14 @@
+[Unit]
+Description=NOESIS health check (alerts you on Telegram when something is broken)
+
+[Service]
+Type=oneshot
+User=noesis
+Group=noesis
+WorkingDirectory=/opt/noesis
+EnvironmentFile=/opt/noesis/.env
+Environment=PATH=/opt/noesis/.venv/bin:/usr/local/bin:/usr/bin:/bin
+# exit code 1 means "problems found and reported", not a failed unit
+SuccessExitStatus=1
+ExecStart=/opt/noesis/.venv/bin/python scripts/noesisctl.py doctor --alert
+MemoryMax=300M

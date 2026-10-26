@@ -61,3 +61,22 @@ class TelegramClient:
 
     def me(self) -> dict:
         return self._call("getMe")
+
+    def typing(self, chat_id: int) -> None:
+        try:
+            self._call("sendChatAction", chat_id=chat_id, action="typing")
+        except IntegrationError:
+            pass   # cosmetic
+
+    def download(self, file_id: str, max_bytes: int = 10_000_000) -> bytes:
+        """A file the owner sent (voice note). Telegram bots can fetch files up to 20 MB."""
+        info = self._call("getFile", file_id=file_id)
+        if int(info.get("file_size") or 0) > max_bytes:
+            raise IntegrationError("file too large")
+        try:
+            r = self.client.get(f"{API}/file/bot{self.token}/{info['file_path']}")
+        except httpx.HTTPError as e:
+            raise IntegrationError(f"telegram file download failed: {type(e).__name__}") from e
+        if r.status_code != 200 or len(r.content) > max_bytes:
+            raise IntegrationError(f"telegram file download failed: HTTP {r.status_code}")
+        return r.content

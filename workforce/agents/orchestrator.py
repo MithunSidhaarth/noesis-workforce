@@ -88,12 +88,31 @@ class Orchestrator(Agent):
         params = task.payload.get("params") or {}
         if not name:
             name, params = self.classify(ctx, text)
+        if not name and not task.payload.get("from_agent") and self._to_assistant(ctx, task, text):
+            return {"workflow": None, "forwarded": "assistant"}
         if not name:
             ctx.notify_owner(f"🤔 I couldn't act on that request\n\n“{text[:200]}”\n\nIt doesn't match anything I can run "
                              "safely. Try rephrasing it, e.g. \"find hackathons\", or send /help to see the commands.",
                              key=f"unmapped:{task.id}", force_now=True)
             return {"workflow": None, "reason": "no matching workflow"}
         return self.start_workflow(ctx, name, params, task)
+
+    @staticmethod
+    def _to_assistant(ctx: AgentContext, task: Task, text: str) -> bool:
+        """Free text that isn't a workflow goes to the built-in Assistant (a custom agent on the
+        main bot). Requests an agent handed over (from_agent) never go back, so no loops."""
+        from ..core.queue import BotDisabled
+        from ..custom_agents import BUILTIN_ID, ensure_builtin
+        ensure_builtin(ctx.db)
+        if not ctx.db.scalar("SELECT enabled FROM custom_agents WHERE id=?", (BUILTIN_ID,)):
+            return False
+        try:
+            ctx.queue.enqueue(TaskSpec(bot_id="custom_agents", kind="chat", payload={"agent_id": BUILTIN_ID, "text": text},
+                                       requested_by=task.requested_by or "orchestrator", correlation_id=task.correlation_id,
+                                       idempotency_key=f"assist:{task.id}"))
+        except BotDisabled:
+            return False
+        return True
 
     def run_workflow(self, ctx: AgentContext, task: Task) -> dict:
         return self.start_workflow(ctx, task.payload["workflow"], task.payload.get("params", {}), task)
@@ -181,7 +200,18 @@ class Orchestrator(Agent):
         unknown = db.scalar("SELECT COUNT(*) FROM external_actions WHERE status='unknown'")
         if unknown:
             need.append(f"• {plural(unknown, 'action')} may or may not have gone through. Check the dashboard Logs page before anything is retried.")
+        from ..pipeline import LABELS, pending_proposals
+        props = pending_proposals(db)
+        for p in props[:5]:
+            need.append(f"• Confirm: “{clip(p['title'], 50)}” → {LABELS[p['stage']]}? (/inbox shows the buttons, or /stage {ref(p['opportunity_id'])} {p['stage']})")
         self._section(lines, "Needs you", need)
+
+        from ..habits import streak, todays_shortlist
+        st_ = streak(db)
+        picks = todays_shortlist(db, st_["quota"])
+        self._section(lines, f"Today's {plural(st_['quota'], 'application')} (streak: {plural(st_['streak'], 'day')})", [
+            f"{i}. {clip(o['title'], 60)}{' at ' + o['organizer'] if o['organizer'] else ''}: "
+            f"{int((o['relevance_score'] or 0) * 100)}% fit. (/opp {ref(o['id'])})" for i, o in enumerate(picks, 1)])
 
         closing = db.all("SELECT * FROM opportunities WHERE deadline BETWEEN ? AND ? AND verification_status!='failed' "
                          "AND application_status NOT IN ('SUBMITTED','CLOSED') AND (confirmed_by IS NOT NULL OR "
@@ -225,6 +255,8 @@ class Orchestrator(Agent):
             todo.append(f"submit {plural(len(ready), 'application')}")
         if unknown:
             todo.append(f"check {plural(unknown, 'unclear action')}")
+        if props:
+            todo.append(f"confirm {plural(len(props), 'stage change')}")
         if todo:
             joined = todo[0] if len(todo) == 1 else ", ".join(todo[:-1]) + " and " + todo[-1]
             lines += ["", f"Today: {joined}."]
@@ -328,6 +360,20 @@ class Orchestrator(Agent):
         if skips:
             opp.append("• Why you skipped: " + "; ".join(f"{clip(s['skip_reason'], 40)} ({s['n']})" for s in skips))
         self._section(lines, "Opportunities", opp)
+        from ..pipeline import funnel, response_rates
+        f = funnel(db, since)
+        fa = funnel(db)
+        self._section(lines, "Pipeline", [
+            f"• This week: {f['found']} found → {f['applied']} applied → {f['online_assessment']} OA → {f['interview']} interview → "
+            f"{f['offer']} offer",
+            f"• All time: {fa['applied']} applied → {fa['online_assessment']} OA → {fa['interview']} interview → {fa['offer']} offer"
+            + (f" ({int(100 * (fa['online_assessment'] + fa['interview']) / fa['applied'])}% heard back)" if fa['applied'] else "")])
+        by_src = [r for r in response_rates(db, "source") if r["applied"]][:4]
+        by_co = [r for r in response_rates(db, "company") if r["applied"] >= 2][:4]
+        self._section(lines, "Response rate", [f"• {r['name']}: {r['replied']}/{r['applied']} replied" for r in by_src]
+                      + [f"• {r['name']}: {r['replied']}/{r['applied']}" for r in by_co])
+        from ..insights import weekly_insights
+        self._section(lines, "What's working", [f"• {t}" for t in weekly_insights(db)[:5]])
         self._section(lines, "Costs", [f"• Model spend: ${spend:.2f}"])
         tips = []
         for s_ in skips:

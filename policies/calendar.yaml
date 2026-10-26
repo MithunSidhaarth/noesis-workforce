@@ -1,0 +1,10 @@
+# Google Calendar sync (calendar.owner_event): NOESIS puts your own deadlines, OAs and
+# interviews on your primary calendar. Events are created without guests, so nobody
+# else is invited or emailed. Off until you re-run scripts/google_oauth.py (it now asks
+# for the calendar.events scope) and set sync_enabled: true.
+version: 1
+sync_enabled: false
+deadlines: true          # applications you confirmed or applied to, at their deadline
+stage_events: true       # OAs and interviews you logged with /stage <ref> <stage> <date> <time>
+deadline_minutes: 30     # event length for a deadline marker
+event_minutes: 60        # event length for an OA / interview

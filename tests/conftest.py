@@ -52,7 +52,7 @@ def env(tmp_path, monkeypatch):
     # deterministic delivery in tests; quiet hours have their own tests
     monkeypatch.setenv("NOESIS_QUIET_HOURS", "off")
     monkeypatch.setenv("NOESIS_MAX_PINGS_PER_DAY", "1000")
-    for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OLLAMA_ENABLED", "TELEGRAM_BOT_TOKEN"):
+    for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OLLAMA_ENABLED", "TELEGRAM_BOT_TOKEN", "CLAUDE_CODE_ENABLED"):
         monkeypatch.delenv(k, raising=False)
 
     from workforce.core import db as dbmod

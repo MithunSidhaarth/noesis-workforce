@@ -5,8 +5,12 @@ global_daily_budget_usd: 0.50     # hard stop for all bots combined
 cache_ttl_s: 604800               # reuse identical prompt results for 7 days
 
 providers:
+  claude_code:
+    kind: claude_code             # the `claude` CLI signed in with your Claude subscription (personal use within the
+    env: CLAUDE_CODE_ENABLED      # plan's limits). Set CLAUDE_CODE_ENABLED=1 after `claude` login on the server.
+                                  # Runs with every tool disabled; one call at a time (file lock); cost recorded as 0.
   anthropic:
-    kind: anthropic               # official Anthropic SDK; needs ANTHROPIC_API_KEY (Claude Pro does NOT include API usage)
+    kind: anthropic               # official Anthropic SDK; needs ANTHROPIC_API_KEY (pay-as-you-go, separate from the subscription)
     env: ANTHROPIC_API_KEY
   groq:
     kind: openai_compatible       # free tier with rate limits; availability not guaranteed
@@ -24,6 +28,12 @@ providers:
 # Ordered by preference inside each tier. The router picks the first model whose
 # provider is configured, whose tier the bot allows, and that supports the capability.
 models:
+  # Claude Code first: best writing, covered by your subscription. When it hits a usage
+  # limit or is logged out the router falls back to Gemini's free tier automatically.
+  - {id: claude-code-haiku, provider: claude_code, model: haiku, tier: cheap, in: 0.0, out: 0.0,
+     capabilities: [classify, extract, summarize, write, research, long_context]}
+  - {id: claude-code-sonnet, provider: claude_code, model: sonnet, tier: standard, in: 0.0, out: 0.0,
+     capabilities: [classify, extract, summarize, write, research, code, long_context, reasoning]}
   - {id: gemini-flash, provider: gemini, model: gemini-3.5-flash, tier: cheap, in: 0.0, out: 0.0,
      capabilities: [classify, extract, summarize, write, research]}
   - {id: groq-llama, provider: groq, model: llama-3.3-70b-versatile, tier: cheap, in: 0.0, out: 0.0,

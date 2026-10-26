@@ -14,7 +14,8 @@
   reels FOLDER [--brand B] [--every-hours 3] [--window 09:00-23:00]
                                  queue finished reels from FOLDER/manifest.yaml, one per slot
   reels list                     reels waiting for their slot
-  doctor                         check configuration and health; prints what to fix
+  doctor [--alert]               check configuration and health; prints what to fix
+                                 (--alert: also message you on Telegram when something is broken; for the systemd timer)
   confirm REF [URL] | skip REF [REASON] | outcome REF accepted|rejected|no_response
   profile-set KEY VALUE          add a verified fact (same as Telegram /profile set)
   prune                          run the data-retention cleanup now
@@ -90,7 +91,7 @@ def main(argv: list[str]) -> int:
         print("bot:", tg.me().get("username"))
         print("sent message id:", tg.send_owner("NOESIS test message: Telegram is connected.").get("message_id"))
     elif cmd == "doctor":
-        return doctor(db)
+        return doctor(db, alert="--alert" in args)
     elif cmd in ("confirm", "skip", "outcome", "profile-set"):
         from workforce import owner_actions as oa
         try:
@@ -139,7 +140,7 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-def doctor(db) -> int:
+def doctor(db, alert: bool = False) -> int:
     """Read-only checks. Exit code 1 if anything is broken (not just a warning)."""
     from workforce.core.settings import get_settings
     from workforce.sources.registry import load_profile, profile_problems
@@ -153,7 +154,8 @@ def doctor(db) -> int:
           "NOESIS_SESSION_SECRET missing or shorter than 32 chars")
     check(os.environ.get("NOESIS_ADMIN_PASSWORD_HASH", "").startswith("pbkdf2_sha256"), "dashboard password hash set",
           "NOESIS_ADMIN_PASSWORD_HASH missing: run scripts/hash_password.py")
-    if "docker-compose.private.yml" in os.environ.get("COMPOSE_FILE", ""):
+    if "docker-compose.private.yml" in os.environ.get("COMPOSE_FILE", "") or \
+            os.environ.get("NOESIS_PRIVATE_MODE", "").lower() in ("1", "true", "yes", "on"):
         ok.append("private mode: dashboard only over Tailscale, no public ports")
     else:
         dom = os.environ.get("NOESIS_DOMAIN", "")
@@ -172,7 +174,17 @@ def doctor(db) -> int:
         check(p.is_dir() and os.access(p, os.W_OK), f"vault writable at {p}", f"vault path {p} missing or not writable", fatal=False)
     else:
         warn.append("NOESIS_VAULT_PATH not set: notes are staged in data/vault-staging")
-    providers = [k for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY") if os.environ.get(k)]
+    from workforce.core.state import set_integration_status
+    if os.environ.get("CLAUDE_CODE_ENABLED", "").lower() in ("1", "true", "yes", "on"):
+        from workforce.model_router.router import claude_code_status
+        cc_ok, cc_detail = claude_code_status()
+        set_integration_status(db, "claude_code", "ok" if cc_ok else "error", cc_detail)
+        check(cc_ok, f"Claude Code: {cc_detail}",
+              f"Claude Code: LOGGED OUT or broken ({cc_detail}). SSH in and run `claude` once to log in again.")
+    else:
+        set_integration_status(db, "claude_code", "not_configured", "CLAUDE_CODE_ENABLED is not set")
+    providers = [k for k in ("CLAUDE_CODE_ENABLED", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY")
+                 if os.environ.get(k)]
     check(bool(providers) or os.environ.get("OLLAMA_ENABLED") == "true", f"model providers: {', '.join(providers) or 'ollama'}",
           "no model provider configured: bots run deterministic-only (fine, but no drafting)", fatal=False)
     for p in profile_problems(load_profile()):
@@ -196,6 +208,23 @@ def doctor(db) -> int:
     check(bool(backups) and time.time() - backups[-1].stat().st_mtime < 2 * 86400, "recent backup present",
           "no backup in the last 2 days (see DEPLOYMENT.md step 10)", fatal=False)
     check(shutil.which("ffmpeg") is not None, "ffmpeg installed", "ffmpeg missing: reels cannot be rendered", fatal=False)
+    agents = db.scalar("SELECT COUNT(*) FROM custom_agents WHERE builtin=0 AND enabled=1 AND telegram_token_enc IS NOT NULL")
+    if agents:
+        from workforce.secrets import SecretKeyMissing, decrypt
+        tok = db.scalar("SELECT telegram_token_enc FROM custom_agents WHERE builtin=0 AND telegram_token_enc IS NOT NULL LIMIT 1")
+        try:
+            decrypt(tok)
+            ok.append(f"{agents} custom agent bot(s); tokens decrypt")
+        except SecretKeyMissing as e:
+            bad.append(f"custom agents: {e}")
+        hb = db.scalar("SELECT value FROM system_state WHERE key='agents_heartbeat'")
+        check(bool(hb) and time.time() - float(hb) < 180, "agents service alive", "agents service heartbeat missing or stale (noesis-agents)")
+        for a in db.all("SELECT name, last_error FROM custom_agents WHERE enabled=1 AND last_error IS NOT NULL"):
+            warn.append(f"agent {a['name']}: {a['last_error'][:120]}")
+    from workforce.policies.engine import Policies
+    if Policies().get("phone").get("enabled"):
+        check(bool(os.environ.get("CALLME_USER_PHONE_NUMBER")), "phone calls enabled and configured",
+              "policies/phone.yaml enables calls but CALLME_* is not set in .env (docs/PHONE.md)", fatal=False)
     for x in ok:
         print(f"  ok    {x}")
     for x in warn:
@@ -203,7 +232,37 @@ def doctor(db) -> int:
     for x in bad:
         print(f"  FIX   {x}")
     print(f"\n{len(bad)} problem(s), {len(warn)} warning(s)")
+    if alert:
+        doctor_alert(db, bad)
     return 1 if bad else 0
+
+
+def doctor_alert(db, bad: list[str]) -> None:
+    """Straight to Telegram, not through the worker: this has to work when the worker is the
+    thing that's down. Only the owner's chat; repeats an unchanged problem list every 6 hours at
+    most, and says once when everything is fine again."""
+    import hashlib
+    from workforce.core.state import audit
+    key = hashlib.sha256("\n".join(sorted(bad)).encode()).hexdigest()[:16] if bad else "ok"
+    prev = db.one("SELECT value, updated_at FROM system_state WHERE key='doctor_alert'")
+    if prev and prev["value"] == key and (key == "ok" or time.time() - prev["updated_at"] < 6 * 3600):
+        return
+    if key == "ok" and not prev:
+        return
+    from workforce.factory import build_services
+    tg = build_services(db).extra.get("telegram")
+    text = ("✅ NOESIS is healthy again." if key == "ok" else
+            "🩺 NOESIS health check found problems\n\n" + "\n".join(f"• {b}" for b in bad[:10])
+            + "\n\nSSH in and run: noesisctl doctor (docs/GCP.md, Troubleshooting).")
+    if tg is not None:
+        try:
+            tg.send_owner(text)
+        except Exception as e:  # noqa: BLE001
+            print(f"could not send the alert: {e}")
+            return
+    db.execute("INSERT INTO system_state(key, value, updated_at, updated_by) VALUES ('doctor_alert', ?, ?, 'doctor') "
+               "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (key, time.time()))
+    audit(db, "doctor", "doctor.alert", None, {"problems": len(bad)})
 
 
 if __name__ == "__main__":

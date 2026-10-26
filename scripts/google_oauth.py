@@ -29,7 +29,10 @@ import webbrowser
 import httpx
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.compose",
-          "https://www.googleapis.com/auth/calendar.readonly"]
+          "https://www.googleapis.com/auth/calendar.readonly",
+          # v2.0 calendar sync: events on your own calendar only (deadlines, OAs, interviews; no invites).
+          # Already set up v1? Run this script again once to grant it.
+          "https://www.googleapis.com/auth/calendar.events"]
 
 
 def main() -> None:
