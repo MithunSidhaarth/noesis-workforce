@@ -2,6 +2,8 @@
 
   python scripts/check_sources.py            # enabled sources
   python scripts/check_sources.py --all      # include disabled ones
+  python scripts/check_sources.py --probe "Razorpay" [--domain razorpay.com]
+                                             # find a company's Greenhouse / Lever / Ashby slug
 
 For each source it fetches the URL with the real fetcher (robots.txt respected,
 honest User-Agent), parses it, and prints how many items and how many labelled
@@ -24,8 +26,21 @@ from workforce.sources.registry import load_sources  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--all", action="store_true")
+    ap.add_argument("--probe", default="", help="company name to look up on Greenhouse, Lever and Ashby")
+    ap.add_argument("--domain", default=None)
     a = ap.parse_args()
     f = Fetcher(min_host_interval_s=1.0)
+    if a.probe:
+        from workforce.sources.boards import probe
+        hits = probe(f, a.probe, a.domain)
+        for h in hits:
+            print(f"FOUND {h['ats']:10} slug={h['slug']:24} {h['total']:4} roles, {h['items']:3} BLR/India/remote internships")
+            print(f"      add to config/sources/feeds.yaml: - {{company: {a.probe}, ats: {h['ats']}, slug: {h['slug']}"
+                  + (f", domain: {a.domain}" if a.domain else "") + "}")
+        if not hits:
+            print(f"No Greenhouse / Lever / Ashby board found for {a.probe!r}. It may use Workday or its own site: "
+                  "list it in docs/SOURCES.md and send postings with /add <link>.")
+        return 0 if hits else 1
     bad = 0
     for s in load_sources():
         if not s.enabled and not a.all:
@@ -33,7 +48,7 @@ def main() -> int:
         if s.kind == "fixture":
             continue
         try:
-            r = f.get(s.url)
+            r = f.get(s.url, max_bytes=s.parser.get("max_bytes"))
             if s.kind == "rss":
                 items = parsing.parse_feed(r.content, r.url)
             elif s.kind == "html":

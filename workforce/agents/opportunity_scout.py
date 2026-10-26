@@ -20,7 +20,7 @@ LLM_FIELDS = ("organizer", "location", "eligibility", "required_materials", "est
 
 @register("opportunity_scout")
 class OpportunityScout(Agent):
-    accepts = {"check_source", "find_opportunities"}
+    accepts = {"check_source", "find_opportunities", "ingest_link"}
 
     def handlers(self):
         return {
@@ -28,7 +28,81 @@ class OpportunityScout(Agent):
             "check_source": self.check_source,
             "find_opportunities": self.sweep_sources,
             "process_verification": self.process_verification,
+            "ingest_link": self.ingest_link,
         }
+
+    # ---- a link the owner sent (Internshala, Unstop, Wellfound, a careers page...) ----
+    def ingest_link(self, ctx: AgentContext, task: Task) -> dict:
+        """One page, fetched once and politely (robots.txt honoured), or the text the owner
+        pasted. LinkedIn is never fetched: the owner pastes the description instead."""
+        from ..owner_actions import clip, ref
+        url = parsing.normalize_url(task.payload.get("url"))
+        pasted = str(task.payload.get("text") or "")[:20000]
+        if not url:
+            raise PermanentError("not a valid link")
+        title, body = "", pasted
+        if not pasted:
+            fetcher = ctx.services.get("fetcher")
+            if fetcher is None:
+                raise PermanentError("no fetcher configured")
+            try:
+                page = fetcher.get(url)
+            except Exception as e:  # noqa: BLE001  (robots.txt refusal, 403, timeout: tell the owner, don't retry around it)
+                ctx.notify_owner(f"⚠️ I couldn't open that link\n\n{url}\n{str(e)[:200]}\n\nPaste the posting's text instead: "
+                                 "/add <link> <the description>", key=f"linkfail:{task.id}", force_now=True)
+                return {"url": url, "error": str(e)[:200]}
+            title, body = page_title_and_text(page.text)
+        item = {"title": clip(title or pasted.split("\n", 1)[0], 200), "url": url, "body": body[:12000], "links": [],
+                "tags": []}
+        fields = self._extract_link_fields(ctx, item) if ctx.has_model("extract") else {}
+        if fields.get("title"):
+            item["title"] = fields["title"]
+        if fields.get("organizer"):
+            item["author"] = fields["organizer"]
+        if fields.get("location"):
+            item["location"] = fields["location"]
+        if fields.get("deadline"):
+            item["structured_deadline"] = fields["deadline"]
+        src = ctx.db.one("SELECT * FROM sources WHERE id='owner_links'") or {"id": "owner_links", "default_type": "internship"}
+        opp = parsing.normalize_item(item, {**dict(src), "author_is_organizer": True, "default_type": "internship"},
+                                     get_settings().timezone)
+        if not opp:
+            ctx.notify_owner(f"🤔 I couldn't find a posting on that page\n\n{url}\nPaste its text: /add <link> <the description>",
+                             key=f"linkempty:{task.id}", force_now=True)
+            return {"url": url, "stored": False}
+        if fields.get("stipend") and fields["stipend"].lower()[:12] in (body or "").lower():
+            opp["stipend"] = fields["stipend"]
+        oid = self._store(ctx, opp, src)
+        if oid is None:
+            existing = ctx.db.one("SELECT id, title FROM opportunities WHERE fingerprint=?", (parsing.fingerprint(opp),))
+            ctx.notify_owner(f"📌 Already tracking that one\n\n{clip(existing['title'] if existing else opp['title'], 120)}"
+                             + (f"\nref {ref(existing['id'])}" if existing else ""), key=f"linkdup:{task.id}", force_now=True)
+            return {"url": url, "duplicate": True}
+        from ..pipeline import set_stage
+        set_stage(ctx.db, oid, "shortlisted", by="owner", note="you sent the link")
+        ctx.send(MessageType.VERIFICATION_REQUEST, {"kind": "opportunity", "opportunity_id": oid},
+                 recipient="quality", dedupe_key=f"verify:{oid}", response_type=MessageType.VERIFICATION_RESULT)
+        ctx.notify_owner(f"📌 Added to your shortlist\n\n{clip(opp['title'], 150)}\n{opp.get('organizer') or ''}\n"
+                         f"I'm checking it and scoring the fit now. Send /opp {ref(oid)} for details.\nref {ref(oid)}",
+                         key=f"linkadded:{oid}", force_now=True)
+        return {"url": url, "opportunity_id": oid}
+
+    def _extract_link_fields(self, ctx: AgentContext, item: dict) -> dict:
+        prompt = ("This is one job or internship posting page. Return JSON with keys title (the role), organizer (the "
+                  "company), location, deadline (as written, or null), stipend (as written, or null). Copy values from the "
+                  "text; use null when it is not stated.\n" + untrusted(f"{item['title']}\n{item['body']}", 8000))
+        try:
+            data = ctx.llm("extract", prompt, max_tokens=300).json()
+        except Exception as e:  # noqa: BLE001
+            ctx.log(f"link extraction unavailable: {e}", level="debug")
+            return {}
+        raw = f"{item['title']} {item['body']}".lower()
+        out = {}
+        for k in ("title", "organizer", "location", "deadline", "stipend"):
+            v = data.get(k) if isinstance(data, dict) else None
+            if isinstance(v, str) and v.strip() and (k == "title" or v.strip().lower()[:30] in raw):
+                out[k] = v.strip()[:200]
+        return out
 
     # ---- discovery -------------------------------------------------------
     def sweep_sources(self, ctx: AgentContext, task: Task) -> dict:
@@ -55,7 +129,8 @@ class OpportunityScout(Agent):
             else:
                 if fetcher is None:
                     raise PermanentError("no fetcher configured")
-                r = fetcher.get(src["url"], src["etag"], src["last_modified"])
+                pcfg = loads(src["parser_json"], {})
+                r = fetcher.get(src["url"], src["etag"], src["last_modified"], max_bytes=pcfg.get("max_bytes"))
                 content, etag, lm, not_modified, base = r.content, r.etag, r.last_modified, r.not_modified, r.url
             parser_cfg = loads(src["parser_json"], {})
             items = []
@@ -103,9 +178,13 @@ class OpportunityScout(Agent):
         if ctx.db.scalar("SELECT 1 FROM opportunities WHERE fingerprint=?", (fp,)):
             return True
         norm = parsing.normalize_title(opp["title"])
-        # compare across types: the same event is often labelled differently by different sources
-        recent = ctx.db.all("SELECT title FROM opportunities WHERE discovered_at > ?", (now() - 120 * 86400,))
-        return any(difflib.SequenceMatcher(None, norm, parsing.normalize_title(r["title"])).ratio() > 0.92 for r in recent)
+        # compare across types: the same event is often labelled differently by different sources.
+        # Job titles repeat across companies ("Software Engineering Intern"), so when the organiser
+        # is known only listings from the same organiser (or with none recorded) can be duplicates.
+        org = (opp.get("organizer") or "").strip().lower()
+        recent = ctx.db.all("SELECT title, organizer FROM opportunities WHERE discovered_at > ?", (now() - 120 * 86400,))
+        return any(difflib.SequenceMatcher(None, norm, parsing.normalize_title(r["title"])).ratio() > 0.92
+                   for r in recent if not org or not r["organizer"] or r["organizer"].strip().lower() == org)
 
     def _store(self, ctx: AgentContext, opp: dict, src: dict) -> str | None:
         fp = parsing.fingerprint(opp)
@@ -118,12 +197,13 @@ class OpportunityScout(Agent):
             ctx.db.execute(
                 "INSERT INTO opportunities(id, fingerprint, title, organizer, official_url, discovery_source, discovery_url, type, location, "
                 "remote_status, deadline, deadline_text, deadline_tz, eligibility_json, required_materials_json, estimated_effort, summary, "
-                "discovered_at, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "discovered_at, raw_json, stipend, published_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (oid, fp, opp["title"], opp.get("organizer"), opp.get("official_url"), src["id"], opp.get("discovery_url"),
                  opp["type"], opp.get("location"), opp["remote_status"], opp.get("deadline"), opp.get("deadline_text"),
                  opp.get("deadline_tz"), dumps(opp.get("eligibility", [])), dumps(opp.get("required_materials", [])),
                  opp.get("estimated_effort"), opp.get("summary"), now(), dumps({"raw_text": opp.get("raw_text", "")[:8000],
-                                                       "candidate_links": opp.get("candidate_links", [])})))
+                                                       "candidate_links": opp.get("candidate_links", [])}),
+                 opp.get("stipend"), opp.get("published")))
         except Exception as e:
             if "UNIQUE" in str(e):
                 return None
@@ -210,6 +290,18 @@ class OpportunityScout(Agent):
         if path:
             ctx.db.execute("UPDATE opportunities SET note_path=? WHERE id=?", (path, opp["id"]))
         return path
+
+
+def page_title_and_text(html_text: str) -> tuple[str, str]:
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    for t in soup(["script", "style", "noscript", "nav", "footer", "header", "svg"]):
+        t.decompose()
+    og = soup.find("meta", attrs={"property": "og:title"})
+    h1 = soup.find("h1")
+    title = (og.get("content") if og and og.get("content") else None) or (h1.get_text(" ", strip=True) if h1 else None) \
+        or (soup.title.get_text(" ", strip=True) if soup.title else "")
+    return parsing.clean_text(title)[:200], parsing.clean_text(soup.get_text(" "))[:15000]
 
 
 def _slug(t: str) -> str:

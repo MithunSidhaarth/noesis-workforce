@@ -83,7 +83,10 @@ class Fetcher:
         if wait > 0:
             time.sleep(wait)
 
-    def get(self, url: str, etag: str | None = None, last_modified: str | None = None) -> FetchResult:
+    def get(self, url: str, etag: str | None = None, last_modified: str | None = None,
+            max_bytes: int | None = None) -> FetchResult:
+        """max_bytes: per-source cap (SimplifyJobs' listing file is ~13 MB); default 5 MB."""
+        limit = int(max_bytes or MAX_BYTES)
         if urlparse(url).scheme not in ("http", "https"):
             raise FetchBlocked(f"refusing non-http url {url}")
         if not self._robots_ok(url):
@@ -107,8 +110,8 @@ class Fetcher:
                 buf = bytearray()
                 for chunk in r.iter_bytes():
                     buf += chunk
-                    if len(buf) > MAX_BYTES:
-                        raise IntegrationError(f"response from {url} exceeds {MAX_BYTES} bytes")
+                    if len(buf) > limit:
+                        raise IntegrationError(f"response from {url} exceeds {limit} bytes")
                 return FetchResult(str(r.url), r.status_code, bytes(buf), r.headers.get("content-type", ""),
                                    r.headers.get("etag"), r.headers.get("last-modified"))
         except httpx.HTTPError as e:

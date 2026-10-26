@@ -72,7 +72,10 @@ class QualityAgent(Agent):
                 notes.append(f"reachability: {detail}")
                 if not ok:
                     failed = True
-        if opp["deadline"] is None:
+        rolling = bool(loads(src.get("parser_json"), {}).get("rolling")) and url and "aggregator" not in " ".join(notes)
+        if opp["deadline"] is None and rolling:
+            notes.append("rolling posting on the company's official job board (no deadline stated; apply early)")
+        elif opp["deadline"] is None:
             notes.append("deadline not stated in the source; left unknown")
             review = True
         elif opp["deadline"] < now():
@@ -85,7 +88,10 @@ class QualityAgent(Agent):
             notes.append(f"deadline taken from source text: \"{opp['deadline_text']}\"")
         # duplicate of an already verified opportunity?
         norm = parsing.normalize_title(opp["title"])
-        for r in ctx.db.all("SELECT id, title FROM opportunities WHERE id!=? AND verification_status='verified'", (opp["id"],)):
+        org = (opp.get("organizer") or "").strip().lower()
+        for r in ctx.db.all("SELECT id, title, organizer FROM opportunities WHERE id!=? AND verification_status='verified'", (opp["id"],)):
+            if org and r["organizer"] and r["organizer"].strip().lower() != org:
+                continue
             if difflib.SequenceMatcher(None, norm, parsing.normalize_title(r["title"])).ratio() > 0.92:
                 notes.append(f"possible duplicate of {r['id']}")
                 review = True
