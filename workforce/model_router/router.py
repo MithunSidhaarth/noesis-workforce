@@ -244,6 +244,8 @@ class ModelRouter:
         if order:
             rank = {p: i for i, p in enumerate(order)}
             out.sort(key=lambda m: rank.get(m["provider"], len(order)))   # stable: keeps models.yaml order otherwise
+        if bot.model.prefer_tier:
+            out.sort(key=lambda m: m["tier"] != bot.model.prefer_tier)
         return out
 
     def available(self) -> list[str]:

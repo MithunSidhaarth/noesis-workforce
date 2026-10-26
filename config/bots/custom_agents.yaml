@@ -1,0 +1,13 @@
+id: custom_agents
+name: Custom Agents
+purpose: Runs the agents you create in the dashboard (each its own Telegram bot) and the built-in Assistant on the main bot.
+agent: custom_agent
+instructions_file: custom_agent.md
+# action grants for the engine as a whole; each agent is further limited to the tools
+# you ticked for it (workforce/custom_agents.py TOOLS). None of these reach anyone but you.
+tools: [telegram.custom_agent_reply, telegram.notify_owner, ntfy.notify_owner, email.draft, vault.write, phone.call_owner]
+can_message: [orchestrator, applications, personal_ops]
+model: {default_capability: write, allowed_tiers: [none, cheap, standard], daily_call_limit: 150, daily_budget_usd: 0.20, provider_order: [claude_code, gemini, groq]}
+max_concurrency: 3
+task_timeout_s: 300
+max_delegation_depth: 3

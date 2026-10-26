@@ -85,6 +85,27 @@ class Scheduler:
             self.db.execute("UPDATE schedules SET next_run=?, last_run=?, last_task_id=?, skipped=0 WHERE id=?", (nxt, t, tid, s["id"]))
             if created:
                 fired.append(tid)
+        fired += self.custom_agent_runs(t)
+        return fired
+
+    def custom_agent_runs(self, t: float) -> list[str]:
+        """Custom agents with a schedule ("every 6h", "at 08:30") get a run_task at each slot."""
+        from .custom_agents import compute_next_run, due_runs
+        fired = []
+        for a in due_runs(self.db, t):
+            try:
+                tid, created = self.queue.enqueue(TaskSpec(
+                    bot_id="custom_agents", kind="run_task", payload={"agent_id": a["id"]}, requested_by="scheduler",
+                    idempotency_key=f"carun:{a['id']}:{int(a['next_run'])}"))
+            except BotDisabled:
+                continue
+            try:
+                nxt = compute_next_run(a["schedule"], t, last=a["next_run"])
+            except Exception:  # noqa: BLE001  (a schedule edited into something invalid: stop, don't loop)
+                nxt = None
+            self.db.execute("UPDATE custom_agents SET next_run=? WHERE id=?", (nxt, a["id"]))
+            if created:
+                fired.append(tid)
         return fired
 
     def housekeeping(self) -> dict:

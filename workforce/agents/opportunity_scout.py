@@ -29,7 +29,12 @@ class OpportunityScout(Agent):
             "find_opportunities": self.sweep_sources,
             "process_verification": self.process_verification,
             "ingest_link": self.ingest_link,
+            "drive_radar": self.drive_radar,
         }
+
+    def drive_radar(self, ctx: AgentContext, task: Task) -> dict:
+        from ..drives import radar
+        return radar(ctx)
 
     # ---- a link the owner sent (Internshala, Unstop, Wellfound, a careers page...) ----
     def ingest_link(self, ctx: AgentContext, task: Task) -> dict:

@@ -13,7 +13,8 @@ class PersonalOpsAgent(Agent):
 
     def handlers(self):
         return {"create_reminder": self.create_reminder, "cancel_reminder": self.cancel_reminder,
-                "send_due_reminders": self.send_due}
+                "send_due_reminders": self.send_due, "calendar_sync": self.calendar_sync,
+                "test_call": self.test_call}
 
     def create_reminder(self, ctx: AgentContext, task: Task) -> dict:
         p = task.payload
@@ -47,6 +48,7 @@ class PersonalOpsAgent(Agent):
             if res is not None and res.status in ("succeeded", "dry_run", "duplicate"):
                 ctx.db.execute("UPDATE reminders SET status='sent' WHERE id=?", (r["id"],))
                 sent += 1
+                self._maybe_call(ctx, r)
         # urgent items that were held (quiet hours, daily cap, or registered by a service
         # without Telegram access) go out as soon as they are allowed to
         flushed = 0
@@ -56,3 +58,31 @@ class PersonalOpsAgent(Agent):
             res = ctx.deliver(n["id"], n["key"], n["text"], n["buttons"], urgent=bool(n.get("urgent")))
             flushed += int(res is not None and res.status in ("succeeded", "dry_run", "duplicate"))
         return {"due": len(due), "sent": sent, "flushed": flushed}
+
+    def calendar_sync(self, ctx: AgentContext, task: Task) -> dict:
+        from ..calendar_sync import sync
+        return sync(ctx)
+
+    def test_call(self, ctx: AgentContext, task: Task) -> dict:
+        from ..phone import call_owner
+        out = call_owner(ctx, "This is a test call from NOESIS. If you can hear this, phone alerts work.", "test",
+                         key=f"test:{task.id}")
+        text = {"placed": "📞 Test call placed. Your phone should ring now.",
+                "dry_run": "📞 Test mode: the call was rehearsed, not placed."}.get(
+            out["status"], f"📞 No test call: {out['detail']}. See docs/PHONE.md.")
+        ctx.notify_owner(text, key=f"calltest:{task.id}", force_now=True)
+        return out
+
+    @staticmethod
+    def _maybe_call(ctx: AgentContext, r: dict) -> None:
+        """An interview in an hour, or the last day for an application you haven't sent yet,
+        also rings your phone (policies/phone.yaml decides; off by default)."""
+        from ..phone import call_owner, reminder_call_reason
+        reason = reminder_call_reason(r)
+        if not reason or ctx.services.get("phone") is None:
+            return
+        if reason == "deadline_last_day":
+            stage = ctx.db.scalar("SELECT stage FROM opportunities WHERE id=?", (r.get("ref_id"),))
+            if stage not in ("shortlisted", "preparing"):
+                return
+        call_owner(ctx, "NOESIS reminder. " + r["title"].split(" http")[0], reason, key=f"rem:{r['id']}")

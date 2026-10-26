@@ -3,6 +3,7 @@ from . import (  # noqa: F401
     applications,
     communications,
     content,
+    custom_agent,
     knowledge,
     opportunity_scout,
     orchestrator,

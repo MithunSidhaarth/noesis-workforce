@@ -88,12 +88,31 @@ class Orchestrator(Agent):
         params = task.payload.get("params") or {}
         if not name:
             name, params = self.classify(ctx, text)
+        if not name and not task.payload.get("from_agent") and self._to_assistant(ctx, task, text):
+            return {"workflow": None, "forwarded": "assistant"}
         if not name:
             ctx.notify_owner(f"🤔 I couldn't act on that request\n\n“{text[:200]}”\n\nIt doesn't match anything I can run "
                              "safely. Try rephrasing it, e.g. \"find hackathons\", or send /help to see the commands.",
                              key=f"unmapped:{task.id}", force_now=True)
             return {"workflow": None, "reason": "no matching workflow"}
         return self.start_workflow(ctx, name, params, task)
+
+    @staticmethod
+    def _to_assistant(ctx: AgentContext, task: Task, text: str) -> bool:
+        """Free text that isn't a workflow goes to the built-in Assistant (a custom agent on the
+        main bot). Requests an agent handed over (from_agent) never go back, so no loops."""
+        from ..core.queue import BotDisabled
+        from ..custom_agents import BUILTIN_ID, ensure_builtin
+        ensure_builtin(ctx.db)
+        if not ctx.db.scalar("SELECT enabled FROM custom_agents WHERE id=?", (BUILTIN_ID,)):
+            return False
+        try:
+            ctx.queue.enqueue(TaskSpec(bot_id="custom_agents", kind="chat", payload={"agent_id": BUILTIN_ID, "text": text},
+                                       requested_by=task.requested_by or "orchestrator", correlation_id=task.correlation_id,
+                                       idempotency_key=f"assist:{task.id}"))
+        except BotDisabled:
+            return False
+        return True
 
     def run_workflow(self, ctx: AgentContext, task: Task) -> dict:
         return self.start_workflow(ctx, task.payload["workflow"], task.payload.get("params", {}), task)

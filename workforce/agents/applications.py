@@ -107,12 +107,22 @@ def submission_method(opp: dict) -> tuple[str, str | None]:
 
 @register("applications")
 class ApplicationsAgent(Agent):
-    accepts = {"evaluate_opportunity", "prepare_application", "tailor_resume", "prepare_stage"}
+    accepts = {"evaluate_opportunity", "prepare_application", "tailor_resume", "prepare_stage", "company_dossier"}
 
     def handlers(self):
         return {"evaluate_opportunity": self.evaluate, "prepare_application": self.evaluate,
                 "submit_application": self.submit, "follow_up_sweep": self.follow_up_sweep,
-                "tailor_resume": self.tailor_resume, "prepare_stage": self.prepare_stage}
+                "tailor_resume": self.tailor_resume, "prepare_stage": self.prepare_stage,
+                "company_dossier": self.company_dossier}
+
+    def company_dossier(self, ctx: AgentContext, task: Task) -> dict:
+        from ..dossier import build_dossier
+        company = str(task.payload.get("company") or "").strip()
+        if not company:
+            raise PermanentError("company_dossier needs a company")
+        d = build_dossier(ctx, company, use_cache=not task.payload.get("refresh"))
+        ctx.notify_owner(d["text"], key=f"dossier:{company.lower()}:{task.id}", force_now=True)
+        return {"company": company, "news": len(d["news"]), "summary": bool(d["summary"])}
 
     def _transition(self, ctx: AgentContext, app: dict, new: str, note: str) -> dict:
         if new != app["state"] and new not in ALLOWED[app["state"]]:
@@ -333,6 +343,9 @@ class ApplicationsAgent(Agent):
         if not opp:
             raise PermanentError("opportunity not found")
         plan = prep_plan(ctx, opp)
+        if opp.get("organizer"):
+            ctx.enqueue_self("company_dossier", {"company": opp["organizer"]},
+                             idempotency_key=f"dossier:{opp['id']}:{opp.get('stage')}")
         return {"opportunity_id": opp["id"], "stage": opp["stage"], "sessions": len(plan.get("sessions", []))}
 
 

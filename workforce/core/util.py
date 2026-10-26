@@ -46,6 +46,7 @@ def utc_iso(ts: float | None) -> str | None:
 
 _SECRET_PATTERNS = [
     (re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}"), "bot<redacted>"),                    # Telegram bot token in URLs
+    (re.compile(r"(?<![A-Za-z0-9])\d{5,15}:[A-Za-z0-9_-]{30,64}"), "<redacted-bot-token>"),  # a bare BotFather token
     (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{12,}"), r"\1<redacted>"),
     (re.compile(r"(?i)((?:access_token|refresh_token|client_secret|api_key|key|token)=)[^&\s\"']+"), r"\1<redacted>"),
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{10,}"), "sk-ant-<redacted>"),

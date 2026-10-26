@@ -15,11 +15,16 @@ actions:
   outreach.send:           {side_effect: true, description: "Send a cold / follow-up email"}
   vault.write:             {side_effect: true, description: "Write a note into the NOESIS vault"}
   web.fetch:               {side_effect: false, description: "Fetch a public page / feed (read-only)"}
+  telegram.custom_agent_reply: {side_effect: true, description: "A custom agent replies to the owner in its own Telegram bot chat"}
+  phone.call_owner:        {side_effect: true, description: "Phone the owner with a spoken alert (policies/phone.yaml; off by default)"}
+  calendar.owner_event:    {side_effect: true, description: "Put a deadline / OA / interview on the owner's own calendar, no guests (policies/calendar.yaml; off by default)"}
 
 # Owner notifications still go out in dry-run so you can watch the system work.
 # Remove an entry to make dry-run silence it as well.
 dry_run_exempt:
   - telegram.notify_owner
+  - telegram.custom_agent_reply
+  - phone.call_owner          # only ever the owner's own number, and off until policies/phone.yaml enables it
   - ntfy.notify_owner
   - vault.write
 
@@ -27,6 +32,7 @@ dry_run_exempt:
 # about approvals and failures while paused.
 pause_exempt:
   - telegram.notify_owner
+  - telegram.custom_agent_reply
   - ntfy.notify_owner
 
 # Actions where sending twice is harmful. If a previous attempt started but its
@@ -38,6 +44,7 @@ no_blind_retry:
   - social.publish
   - application.submit
   - calendar.send_invite
+  - phone.call_owner
 
 # Any action whose attributes.flags contain one of these always needs a human.
 always_require_approval:

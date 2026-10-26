@@ -78,6 +78,8 @@ class ModelPreference(BaseModel):
     # providers tried first, in this order (others follow in models.yaml order); bulk bots
     # put the free Gemini tier first so the subscription is kept for writing
     provider_order: list[str] = Field(default_factory=list)
+    # models of this tier are tried first (custom agents set it from their cheap / standard choice)
+    prefer_tier: str | None = None
 
 
 class BotConfig(BaseModel):

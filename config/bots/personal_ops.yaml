@@ -3,7 +3,8 @@ name: Personal Operations
 purpose: Manages tasks, reminders, deadlines, events and routine admin workflows.
 agent: personal_ops
 instructions_file: personal_ops.md
-tools: [telegram.notify_owner, ntfy.notify_owner]
+tools: [telegram.notify_owner, ntfy.notify_owner, phone.call_owner, calendar.owner_event]
 can_message: [orchestrator, communications]
 schedules:
   - {name: reminder_sweep, kind: send_due_reminders, every: 5m}
+  - {name: calendar_sync, kind: calendar_sync, every: 30m}

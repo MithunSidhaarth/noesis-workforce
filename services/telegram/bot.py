@@ -39,6 +39,20 @@ Internships
 /tailor <n> – resume keyword score and tailored bullets for it
 /drafts <ref> – copy-ready cover letter, bullets and answers
 
+Prep and people
+/dossier <company|ref> – a one-screen company brief
+/referrals <company|ref> – who to ask + a note you send yourself
+/referral add <company> | <name> | <link>
+/debrief <ref> q1; q2; q3 – log what they asked
+/questions [company] – your question bank
+/drives – Google STEP, Amazon WoW, GRiD, Code for Good… and when they open
+/offer <company> | <stipend> | <months> | <city> | <mode> | <ppo> | <learning 1-5>
+/offers – compare your offers
+
+Agents
+/agents – your custom agents (each is its own Telegram bot)
+/call test – check that NOESIS can phone you
+
 Pipeline
 /pipeline – where every application stands
 /stage <ref> <stage> [YYYY-MM-DD HH:MM] – e.g. /stage 3f9a1c oa 2026-11-04 15:00
@@ -59,7 +73,7 @@ System
 /bots · /tasks – what each bot is doing
 /pause – stop all external actions · /resume
 
-Anything else you type goes to the Chief of Staff as a request."""
+Anything else you type goes to the Chief of Staff, and what it can't map to a job goes to your Assistant."""
 
 
 ACTIVE = ("running", "queued", "deferred", "waiting_approval", "failed")
@@ -328,6 +342,90 @@ class CommandHandler:
         if d.get("ats") and d["ats"].get("score") is not None:
             out.append(f"Keyword match {d['ats']['score']}%. Missing: {', '.join(d['ats']['missing'][:8]) or 'none'}")
         return "\n".join(out) or "No drafts yet. Upload your resume and set profile facts, then /confirm it again."
+
+    # ---- v2 extras -------------------------------------------------------------
+    def cmd_dossier(self, arg):
+        company = (arg or "").strip()
+        if not company:
+            return "Use /dossier <company> or /dossier <ref>, e.g. /dossier Razorpay"
+        try:
+            company = find_opportunity(self.db, company).get("organizer") or company
+        except OwnerActionError:
+            pass
+        self.queue.enqueue(TaskSpec(bot_id="applications", kind="company_dossier", payload={"company": company},
+                                    requested_by="telegram", idempotency_key=f"dossier:{company.lower()}:{int(now() // 300)}"))
+        return f"Putting together a brief on {company}. It takes a minute."
+
+    def cmd_referrals(self, arg):
+        from workforce.referrals import plan, render
+        return render(plan(self.db, arg))
+
+    def cmd_referral(self, arg):
+        from workforce.referrals import STATUSES, add_referral, set_status
+        verb, _, rest = (arg or "").partition(" ")
+        if verb == "add":
+            parts = [p.strip() for p in rest.split("|")]
+            if len(parts) < 2:
+                return "Use /referral add <company> | <name> | <profile link (optional)>"
+            r = add_referral(self.db, parts[0], parts[1], parts[2] if len(parts) > 2 else None, by="telegram:owner")
+            return f"Added {r['name']} at {r['company']} (to contact). Update with /referral {ref(r['id'])} messaged"
+        rid, _, status = (arg or "").partition(" ")
+        if rid and status.strip() in STATUSES:
+            r = set_status(self.db, rid, status.strip(), by="telegram:owner")
+            return f"{r['name']} at {r['company']}: {r['status'].replace('_', ' ')}."
+        return f"Use /referral add <company> | <name> | <link>, or /referral <ref> <{'|'.join(STATUSES)}>"
+
+    def cmd_debrief(self, arg):
+        from workforce.debrief import debrief_from_text
+        r = debrief_from_text(self.db, arg, by="telegram:owner")
+        return (f"Logged {plural(r['logged'], 'question')} for {r['company']} ({', '.join(r['topics'])}). "
+                "They'll come up in your next prep plan there, and your Interview Coach can drill you on them.")
+
+    def cmd_questions(self, arg):
+        from workforce.debrief import bank, bank_stats
+        if not arg:
+            st = bank_stats(self.db)
+            if not st:
+                return "Your question bank is empty. After a round, send /debrief <ref> question 1; question 2"
+            return "Your question bank:\n" + "\n".join(f"• {r['company']}: {plural(r['n'], 'question')}" for r in st) \
+                + "\n\n/questions <company> to see them."
+        rows = bank(self.db, arg.strip())
+        return "\n".join(f"• ({r['stage'] or '?'}, {r['topic']}) {clip(r['question'], 120)}" for r in rows) \
+            or f"Nothing logged for {arg.strip()} yet."
+
+    def cmd_offer(self, arg):
+        from workforce.offers import add_offer, parse_offer
+        r = add_offer(self.db, parse_offer(arg), by="telegram:owner")
+        return f"Offer from {r['company']} saved. /offers compares them."
+
+    def cmd_offers(self, _):
+        from workforce.offers import compare, render
+        return render(compare(self.db))
+
+    def cmd_drives(self, _):
+        from workforce.drives import status
+        rows = status(self.db)
+        if not rows:
+            return "No drives configured (config/drives.yaml)."
+        mark = {"open": "🟢 usually open now", "soon": "🟡 usually opens next month", None: "⚪"}
+        return "Off-campus drives (months are approximate; check each page):\n\n" + "\n".join(
+            f"{mark[r['phase']]} {r['name']} ({r['window']})\n   {r['url']}" for r in rows)
+
+    def cmd_call(self, arg):
+        if (arg or "").strip().lower() != "test":
+            return "Send /call test to check that NOESIS can phone you (policies/phone.yaml must have enabled: true)."
+        self.queue.enqueue(TaskSpec(bot_id="personal_ops", kind="test_call", payload={}, requested_by="telegram",
+                                    idempotency_key=f"calltest:{int(now() // 300)}"))
+        return "Placing a test call. If calls are off or it's quiet hours, I'll tell you why here."
+
+    def cmd_agents(self, _):
+        from workforce.custom_agents import list_agents
+        rows = list_agents(self.db)
+        return "Your agents:\n" + "\n".join(
+            f"{'🟢' if a['enabled'] else '⏸'} {a['emoji']} {a['name']}"
+            + (f" (@{a['telegram_username']})" if a.get("telegram_username") else " (this chat)")
+            + (f" · {a['schedule']}" if a.get("schedule") else "") + (f"\n   ⚠️ {a['last_error'][:100]}" if a.get("last_error") else "")
+            for a in rows) + "\n\nCreate and edit agents in the dashboard (Agents → New agent)."
 
     def cmd_remind(self, arg):
         r = create_reminder(self.db, arg, by="telegram:owner")

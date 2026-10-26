@@ -1,0 +1,14 @@
+# Phone calls to the owner (phone.call_owner). Off until you set up a phone provider
+# (see docs/PHONE.md) and switch `enabled` to true. Calls only ever go to
+# CALLME_USER_PHONE_NUMBER from .env; nothing a bot writes can change the number.
+version: 1
+enabled: false
+quiet_hours: "22:00-08:00"     # no calls in this window (local time); the alert goes to Telegram instead
+max_calls_per_day: 3
+min_gap_minutes: 30            # at most one call in this many minutes
+# What may trigger a call. Custom agents with the call_me tool can also request one.
+call_for:
+  interview_1h: true           # 1 hour before an OA / interview you logged with /stage
+  deadline_last_day: true      # the last-day reminder for an application you confirmed
+  agent_request: true          # a custom agent's call_me tool
+  test: true                   # /call test from Telegram or the dashboard
