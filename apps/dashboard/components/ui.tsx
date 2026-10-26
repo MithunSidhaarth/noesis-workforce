@@ -166,3 +166,53 @@ export function Tabs({ tabs, value, onChange }: { tabs: string[]; value: string;
     </div>
   );
 }
+
+export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block font-medium text-zinc-700 dark:text-zinc-300">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-xs text-zinc-500">{hint}</span>}
+    </label>
+  );
+}
+
+/** Fit score as a bar: green from 70%, amber from 50%. */
+export function Fit({ score }: { score?: number | null }) {
+  if (score == null) return <span className="text-xs text-zinc-400">no score</span>;
+  const pct = Math.round(score * 100);
+  const color = pct >= 70 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-zinc-400";
+  return (
+    <span className="inline-flex items-center gap-2" title={`${pct}% fit`}>
+      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+        <span className={`block h-full ${color}`} style={{ width: `${pct}%` }} />
+      </span>
+      <span className="text-xs tabular-nums text-zinc-600 dark:text-zinc-400">{pct}%</span>
+    </span>
+  );
+}
+
+export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; wide?: boolean }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div className={`max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl dark:bg-zinc-900 sm:rounded-2xl ${wide ? "max-w-2xl" : "max-w-lg"}`}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700" aria-label="Close">✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function Copy({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button className="text-xs text-sky-600 hover:underline" onClick={async () => {
+      try { await navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1500); } catch {}
+    }}>{done ? "copied" : "copy"}</button>
+  );
+}
