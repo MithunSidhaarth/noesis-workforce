@@ -5,7 +5,7 @@ agent: quality
 instructions_file: quality.md
 tools: [web.fetch]
 can_message: [opportunity_scout, applications, content_studio, content_strategist, outreach, communications, orchestrator]
-model: {default_capability: classify, allowed_tiers: [none, cheap], daily_call_limit: 200, daily_budget_usd: 0.05}
+model: {default_capability: classify, allowed_tiers: [none, cheap], daily_call_limit: 200, daily_budget_usd: 0.05, provider_order: [gemini, groq, claude_code]}
 max_concurrency: 4
 settings:
   check_url_reachable: true

@@ -10,8 +10,12 @@ should retry later or fall back to deterministic logic). Never fabricates output
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -54,9 +58,89 @@ class Provider(Protocol):
     def complete(self, model: dict, system: str, prompt: str, max_tokens: int) -> Completion: ...
 
 
+USAGE_LIMIT_HINTS = ("usage limit", "rate limit", "limit reached", "credit balance", "quota", "please log in",
+                     "not logged in", "invalid api key", "/login", "authentication")
+
+
+class ClaudeCodeProvider:
+    """The `claude` CLI (Claude Code) signed in with the owner's Claude subscription.
+
+    Hardening, because the prompt often carries untrusted listings and emails:
+      * `--tools ""` disables every built-in tool (no file reads, no shell, no web)
+      * `--strict-mcp-config` with no `--mcp-config` loads no MCP servers
+      * `--setting-sources ""` ignores user/project settings, hooks and CLAUDE.md files
+      * runs in a fresh empty temp directory, prompt on stdin, no session saved
+    Calls are serialised with a file lock: a 1 GB e2-micro can hold one `claude`
+    process at a time. Cost is recorded as 0 (covered by the subscription)."""
+
+    def __init__(self, binary: str | None = None, lock_path: str | None = None, runner=None):
+        self.binary = binary or os.environ.get("CLAUDE_CODE_BIN") or shutil.which("claude") or "claude"
+        self.lock_path = lock_path or os.environ.get("CLAUDE_CODE_LOCK") or str(Path(tempfile.gettempdir()) / "noesis-claude.lock")
+        self._run = runner or subprocess.run
+
+    def command(self, model: dict, system: str) -> list[str]:
+        cmd = [self.binary, "-p", "--output-format", "json", "--model", model["model"], "--tools", "",
+               "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence"]
+        if system:
+            cmd += ["--system-prompt", system]
+        return cmd
+
+    def env(self) -> dict:
+        keep = ("PATH", "HOME", "LANG", "LC_ALL", "USER", "LOGNAME", "TZ", "XDG_CONFIG_HOME", "NODE_EXTRA_CA_CERTS",
+                "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
+        env = {k: v for k, v in os.environ.items() if k in keep or k.startswith("CLAUDE_CODE_") or k == "CLAUDE_CONFIG_DIR"}
+        # never let a pay-as-you-go key silently replace the subscription login
+        env.pop("ANTHROPIC_API_KEY", None)
+        env["DISABLE_AUTOUPDATER"] = "1"
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        return env
+
+    def complete(self, model: dict, system: str, prompt: str, max_tokens: int) -> Completion:
+        timeout = float(model.get("_timeout", 120))
+        Path(self.lock_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(self.lock_path, "a+") as lock, tempfile.TemporaryDirectory(prefix="noesis-claude-") as cwd:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                p = self._run(self.command(model, system), input=prompt, capture_output=True, text=True,
+                              timeout=timeout, cwd=cwd, env=self.env())
+            except subprocess.TimeoutExpired as e:
+                raise ModelUnavailable(f"claude CLI timed out after {timeout:.0f}s") from e
+            except FileNotFoundError as e:
+                raise ModelUnavailable("claude CLI not installed (npm i -g @anthropic-ai/claude-code)") from e
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+        out = (p.stdout or "").strip()
+        try:
+            data = json.loads(out) if out else {}
+        except json.JSONDecodeError:
+            data = {}
+        text = data.get("result") if isinstance(data, dict) else None
+        err = f"{p.stderr or ''} {text or out}"[:300].strip()
+        if p.returncode != 0 or (isinstance(data, dict) and data.get("is_error")) or not isinstance(text, str):
+            low = err.lower()
+            kind = "usage limit / login" if any(h in low for h in USAGE_LIMIT_HINTS) else f"exit {p.returncode}"
+            raise ModelUnavailable(f"claude CLI failed ({kind}): {err}")
+        u = data.get("usage") or {}
+        return Completion(text=text, model=model["model"], provider="claude_code",
+                          input_tokens=int(u.get("input_tokens") or 0), output_tokens=int(u.get("output_tokens") or 0))
+
+
+def claude_code_status(runner=None, timeout: float = 60) -> tuple[bool, str]:
+    """(ok, detail): is the CLI installed and logged in? Used by `noesisctl doctor` and the dashboard."""
+    prov = ClaudeCodeProvider(runner=runner)
+    if runner is None and not shutil.which(prov.binary):
+        return False, "claude CLI not on PATH"
+    try:
+        c = prov.complete({"model": os.environ.get("CLAUDE_CODE_CHECK_MODEL", "haiku"), "_timeout": timeout},
+                          "", "Reply with the word ok.", 10)
+    except ModelUnavailable as e:
+        return False, f"logged out or unavailable: {e}"
+    return True, f"logged in (answered '{c.text.strip()[:20]}')"
+
+
 class AnthropicProvider:
-    """Official Anthropic SDK. Requires a paid API key; a Claude Pro subscription
-    does not authorize unattended runtime API calls."""
+    """Official Anthropic SDK. Requires a paid API key (pay-as-you-go). To use a
+    Claude subscription instead, use the `claude_code` provider (the CLI)."""
 
     def __init__(self):
         import anthropic  # optional dependency
@@ -137,6 +221,10 @@ class ModelRouter:
         try:
             if pc["kind"] == "anthropic":
                 p: Provider = AnthropicProvider()
+            elif pc["kind"] == "claude_code":
+                if os.environ.get(pc["env"], "").strip().lower() not in ("1", "true", "yes", "on"):
+                    return None
+                p = ClaudeCodeProvider()
             else:
                 key = os.environ.get(pc["env"], "")
                 p = OpenAICompatibleProvider(pc["base_url"], "" if pc["env"] == "OLLAMA_ENABLED" else key)
@@ -152,6 +240,10 @@ class ModelRouter:
                 continue
             if self.provider(m["provider"]) is not None:
                 out.append(m)
+        order = bot.model.provider_order
+        if order:
+            rank = {p: i for i, p in enumerate(order)}
+            out.sort(key=lambda m: rank.get(m["provider"], len(order)))   # stable: keeps models.yaml order otherwise
         return out
 
     def available(self) -> list[str]:

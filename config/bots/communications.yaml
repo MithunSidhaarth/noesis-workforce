@@ -5,6 +5,6 @@ agent: communications
 instructions_file: communications.md
 tools: [email.draft, email.send, calendar.create_event, calendar.send_invite, telegram.notify_owner, ntfy.notify_owner]
 can_message: [personal_ops, orchestrator, quality, applications]
-model: {default_capability: classify, allowed_tiers: [none, cheap], daily_call_limit: 100, daily_budget_usd: 0.05}
+model: {default_capability: classify, allowed_tiers: [none, cheap], daily_call_limit: 100, daily_budget_usd: 0.05, provider_order: [gemini, claude_code]}
 schedules:
   - {name: inbox_check, kind: check_inbox, every: 10m}

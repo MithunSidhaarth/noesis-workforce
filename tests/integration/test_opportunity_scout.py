@@ -1,5 +1,6 @@
 """End-to-end: source -> Scout -> Quality -> Scout -> Applications -> Personal Ops,
 with Telegram (fake) notification and a real NOESIS note on disk."""
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -103,7 +104,8 @@ def test_scout_end_to_end(scout_env):
     # the match is not urgent (closes in 20 days), so it is held for the morning brief, not pinged
     alert = db.one("SELECT * FROM notifications WHERE key=?", (f"opp:{fel['id']}",))
     assert alert["status"] == "held" and not alert["urgent"]
-    assert "Closes in 2" in alert["text"] and "Looks official" in alert["text"] and f"ref {fel['id'][-6:]}" in alert["text"]
+    days_left = int((fel["deadline"] - time.time()) // 86400)
+    assert f"Closes in {days_left} day" in alert["text"] and "Looks official" in alert["text"] and f"ref {fel['id'][-6:]}" in alert["text"]
     assert {b["text"] for b in loads(alert["buttons_json"])[0]} == {"✅ Prepare", "⏰ Remind me", "✖ Not for me"}
     sent = services.extra["telegram"].sent
     assert not any("AI Research Fellowship" in s for s in sent)

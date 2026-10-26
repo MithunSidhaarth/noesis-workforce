@@ -172,7 +172,17 @@ def doctor(db) -> int:
         check(p.is_dir() and os.access(p, os.W_OK), f"vault writable at {p}", f"vault path {p} missing or not writable", fatal=False)
     else:
         warn.append("NOESIS_VAULT_PATH not set: notes are staged in data/vault-staging")
-    providers = [k for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY") if os.environ.get(k)]
+    from workforce.core.state import set_integration_status
+    if os.environ.get("CLAUDE_CODE_ENABLED", "").lower() in ("1", "true", "yes", "on"):
+        from workforce.model_router.router import claude_code_status
+        cc_ok, cc_detail = claude_code_status()
+        set_integration_status(db, "claude_code", "ok" if cc_ok else "error", cc_detail)
+        check(cc_ok, f"Claude Code: {cc_detail}",
+              f"Claude Code: LOGGED OUT or broken ({cc_detail}). SSH in and run `claude` once to log in again.")
+    else:
+        set_integration_status(db, "claude_code", "not_configured", "CLAUDE_CODE_ENABLED is not set")
+    providers = [k for k in ("CLAUDE_CODE_ENABLED", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY")
+                 if os.environ.get(k)]
     check(bool(providers) or os.environ.get("OLLAMA_ENABLED") == "true", f"model providers: {', '.join(providers) or 'ollama'}",
           "no model provider configured: bots run deterministic-only (fine, but no drafting)", fatal=False)
     for p in profile_problems(load_profile()):
