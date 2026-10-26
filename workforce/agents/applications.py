@@ -107,11 +107,12 @@ def submission_method(opp: dict) -> tuple[str, str | None]:
 
 @register("applications")
 class ApplicationsAgent(Agent):
-    accepts = {"evaluate_opportunity", "prepare_application"}
+    accepts = {"evaluate_opportunity", "prepare_application", "tailor_resume", "prepare_stage"}
 
     def handlers(self):
         return {"evaluate_opportunity": self.evaluate, "prepare_application": self.evaluate,
-                "submit_application": self.submit, "follow_up_sweep": self.follow_up_sweep}
+                "submit_application": self.submit, "follow_up_sweep": self.follow_up_sweep,
+                "tailor_resume": self.tailor_resume, "prepare_stage": self.prepare_stage}
 
     def _transition(self, ctx: AgentContext, app: dict, new: str, note: str) -> dict:
         if new != app["state"] and new not in ALLOWED[app["state"]]:
@@ -161,8 +162,10 @@ class ApplicationsAgent(Agent):
             app = self._transition(ctx, app, "PREPARATION", f"eligibility {status}")
         answers, missing, docs = self._prepare(ctx, opp, profile, unknown)
         method, dest = submission_method(opp)
-        ctx.db.execute("UPDATE applications SET answers_json=?, missing_json=?, documents_json=?, submission_method=?, updated_at=? WHERE id=?",
-                       (dumps(answers), dumps(missing), dumps(docs), method, now(), app["id"]))
+        drafts = tailor(ctx, opp, profile)
+        ctx.db.execute("UPDATE applications SET answers_json=?, missing_json=?, documents_json=?, submission_method=?, drafts_json=?, "
+                       "resume_version=?, updated_at=? WHERE id=?",
+                       (dumps(answers), dumps(missing), dumps(docs), method, dumps(drafts), drafts.get("resume_version"), now(), app["id"]))
         app = self._transition(ctx, app, "REVIEW", f"prepared; {len(missing)} missing item(s)")
         from ..core.state import SystemState
         from ..owner_actions import clip, closes_in, missing_label, ref, schedule_deadline_reminders
@@ -172,8 +175,17 @@ class ApplicationsAgent(Agent):
         elig = {"eligible": "you meet every stated criterion", "needs_info": "not confirmed yet, some details are missing",
                 "unknown": "not checked"}.get(status, status)
         test = " Test mode is on, so it will only be rehearsed." if SystemState(ctx.db).dry_run else ""
+        ats = drafts.get("ats") or {}
+        extra = []
+        if ats.get("score") is not None:
+            extra.append(f"Resume keyword match: {ats['score']}%" + (f" (missing: {', '.join(ats['missing'][:5])})" if ats.get("missing") else ""))
+        if drafts.get("cover_letter") or drafts.get("bullets"):
+            extra.append(f"Drafted for you: {', '.join(k for k, v in (('cover letter', drafts.get('cover_letter')), ('resume bullets', drafts.get('bullets')), ('common answers', drafts.get('answers'))) if v)}. "
+                         f"Copy them from /drafts {ref(app['id'])} or the dashboard.")
+        if drafts.get("missing_facts"):
+            extra.append("Facts I'd need to say more: " + ", ".join(drafts["missing_facts"][:5]))
         msg = (f"📝 Application draft ready{' (needs your input)' if missing else ''}\n\n{clip(opp['title'], 120)}\n"
-               f"{closes_in(opp['deadline'])}\nEligibility: {elig}"
+               f"{closes_in(opp['deadline'])}\nEligibility: {elig}" + "".join("\n" + x for x in extra)
                + (f"\nStill needed from you: {', '.join(missing_label(m) for m in missing[:8])}. Send /missing to see how to add them."
                   if missing else "\nNothing is missing.")
                + ("\n\nNext: submit it on the organiser's site, then send /submitted " + ref(app['id']) + " <confirmation>."
@@ -265,12 +277,25 @@ class ApplicationsAgent(Agent):
             self._transition(ctx, app, "SUBMITTED", f"evidence: {res.evidence}")
             ctx.db.execute("UPDATE applications SET evidence=?, confirmation_id=?, follow_up_at=? WHERE id=?",
                            (res.evidence, (res.result or {}).get("confirmation_id"), now() + 14 * 86400, app["id"]))
+            from ..pipeline import set_stage
+            set_stage(ctx.db, opp["id"], "applied", by=ctx.bot.id, note=f"sent by email: {res.evidence}")
         return {"application_id": app["id"], "action": res.status, "evidence": res.evidence, "reasons": res.reasons}
 
 
     def follow_up_sweep(self, ctx: AgentContext, task: Task) -> dict:
-        """Submitted applications whose follow-up date passed: ask the owner how it went."""
+        """Submitted applications whose follow-up date passed: ask the owner how it went.
+        Also: anything sitting at 'applied' for 14 days with no reply gets one nudge."""
         from ..owner_actions import clip, ref
+        from ..pipeline import stale_applied
+        nudged = 0
+        for o in stale_applied(ctx.db):
+            days = int((now() - o["stage_updated_at"]) // 86400)
+            ctx.notify_owner(f"⏳ No reply in {days} days\n\n“{clip(o['title'], 100)}”{' at ' + o['organizer'] if o['organizer'] else ''} "
+                             "is still at Applied. A short, polite follow-up to the recruiter often helps; or mark it as no reply.",
+                             key=f"stale:{o['id']}:{int(o['stage_updated_at'])}",
+                             buttons=[[{"text": "👻 No reply", "data": f"st:{o['id']}:ghosted"},
+                                       {"text": "⏳ Still waiting", "data": f"st:{o['id']}:wait"}]])
+            nudged += 1
         due = ctx.db.all("SELECT a.*, o.title FROM applications a JOIN opportunities o ON o.id=a.opportunity_id "
                          "WHERE a.state='SUBMITTED' AND a.follow_up_at IS NOT NULL AND a.follow_up_at<=?", (now(),))
         for a in due:
@@ -278,7 +303,92 @@ class ApplicationsAgent(Agent):
             ctx.notify_owner(f"📬 Any news on an application?\n\n“{clip(a['title'], 100)}” was submitted two weeks ago. "
                              f"How did it go?\nReply /outcome {ref(a['id'])} accepted, rejected or no_response.",
                              key=f"followup:{a['id']}")
-        return {"follow_ups": len(due)}
+        return {"follow_ups": len(due), "stale_nudged": nudged}
+
+    def tailor_resume(self, ctx: AgentContext, task: Task) -> dict:
+        """On demand (/tailor <ref>, dashboard): ATS score + tailored bullets, without an application."""
+        opp = ctx.db.one("SELECT * FROM opportunities WHERE id=?", (task.payload["opportunity_id"],))
+        if not opp:
+            raise PermanentError("opportunity not found")
+        drafts = tailor(ctx, opp, load_profile())
+        ctx.memory_set(f"tailor:{opp['id']}", drafts)
+        from ..owner_actions import clip, ref
+        ats = drafts.get("ats") or {}
+        lines = [f"🧵 Resume tailored for “{clip(opp['title'], 80)}”", ""]
+        if ats.get("score") is not None:
+            lines.append(f"Keyword match: {ats['score']}%. Has: {', '.join(ats['matched'][:8]) or 'none'}. "
+                         f"Missing: {', '.join(ats['missing'][:8]) or 'none'}")
+        for b in drafts.get("bullets", [])[:5]:
+            lines.append(f"• {b['text']}")
+        if not drafts.get("resume_version"):
+            lines.append("Upload your resume in the dashboard (Settings → Resume) so I can score and tailor it.")
+        lines.append(f"\nOne-page PDF: dashboard → Internships → {ref(opp['id'])} → Export PDF")
+        ctx.notify_owner("\n".join(lines), key=f"tailor:{opp['id']}:{int(now() // 60)}", force_now=True)
+        return {"opportunity_id": opp["id"], "ats": ats, "bullets": len(drafts.get("bullets", []))}
+
+    def prepare_stage(self, ctx: AgentContext, task: Task) -> dict:
+        """A listing moved to an OA or interview: a prep plan for that company and round."""
+        from ..prep import prep_plan
+        opp = ctx.db.one("SELECT * FROM opportunities WHERE id=?", (task.payload["opportunity_id"],))
+        if not opp:
+            raise PermanentError("opportunity not found")
+        plan = prep_plan(ctx, opp)
+        return {"opportunity_id": opp["id"], "stage": opp["stage"], "sessions": len(plan.get("sessions", []))}
+
+
+COMMON_QUESTIONS = ["why_this_company", "tell_me_about_yourself", "relevant_project", "availability", "why_this_role"]
+
+
+def tailor(ctx: AgentContext, opp: dict, profile: dict) -> dict:
+    """Drafts for one listing, for the owner to review and copy: a cover letter / "why me",
+    3-5 resume bullets mapped to the job description, answers to common questions, and the
+    ATS keyword score. Only verified facts and lines from the owner's resume are used; a
+    bullet the model can't trace to a resume line is dropped; missing facts are listed."""
+    from ..resume import active_resume, ats_score, grounded
+    res = active_resume(ctx.db)
+    resume_text = res["text"] if res else ""
+    jd = f"{opp['title']}\n{opp.get('summary') or ''}\n{loads(opp.get('raw_json'), {}).get('raw_text', '')}"
+    out: dict = {"resume_version": res["version"] if res else None, "ats": ats_score(resume_text, jd) if res else None,
+                 "status": "draft_requires_your_review"}
+    facts = {k: v for k, v in verified_facts(profile).items() if k not in SENSITIVE_FACTS}
+    answers = {k: v["value"] for k, v in (profile.get("answers") or {}).items()
+               if isinstance(v, dict) and v.get("verified") and v.get("value") not in (None, "")}
+    avail = ", ".join(f"{k.replace('_', ' ')}: {facts[k]}" for k in ("available_from", "duration_months", "target_season") if k in facts)
+    out["answers"] = {"availability": avail} if avail else {}
+    if not ctx.has_model("write") or not (facts or resume_text):
+        out["missing_facts"] = [] if facts else ["verified profile facts"]
+        if not resume_text:
+            out["missing_facts"].append("your resume (upload it in the dashboard)")
+        return out
+    prompt = ("Write application drafts for a student, as JSON with keys: cover_letter (150-220 words), why_me (60 words), "
+              "bullets (3-5 objects {text, maps_to, from_resume}: a resume bullet rephrased to match a requirement in the "
+              "listing; maps_to is that requirement; from_resume is the resume line it rephrases, copied exactly), answers "
+              f"(object with keys {COMMON_QUESTIONS}), missing_facts (facts you would need but don't have). Use ONLY the "
+              "facts, answers and resume lines below. Never add employers, numbers, awards or skills that are not there. "
+              "If something isn't covered, leave it out and list it in missing_facts.\n"
+              f"FACTS: {dumps(facts)}\nSAVED ANSWERS: {dumps(answers)}\nRESUME:\n{resume_text[:6000]}\nLISTING:\n"
+              + untrusted(jd, 5000))
+    try:
+        data = ctx.llm("write", prompt, max_tokens=1800).json()
+    except Exception as e:  # noqa: BLE001  (drafts are optional; the deterministic parts stand)
+        ctx.log(f"tailoring skipped: {e}", level="debug")
+        return out
+    if not isinstance(data, dict):
+        return out
+    for k in ("cover_letter", "why_me"):
+        if isinstance(data.get(k), str) and len(data[k].strip()) > 20:
+            out[k] = data[k].strip()[:3000]
+    bullets = []
+    for b in data.get("bullets") or []:
+        if isinstance(b, dict) and isinstance(b.get("text"), str) and grounded(str(b.get("from_resume", "")), resume_text):
+            bullets.append({"text": b["text"].strip()[:300], "maps_to": str(b.get("maps_to", ""))[:200],
+                            "from_resume": str(b["from_resume"])[:300]})
+    out["bullets"] = bullets[:5]
+    for k, v in (data.get("answers") or {}).items():
+        if k in COMMON_QUESTIONS and isinstance(v, str) and len(v.strip()) > 10:
+            out["answers"][k] = v.strip()[:1500]
+    out["missing_facts"] = [str(m)[:80] for m in (data.get("missing_facts") or []) if isinstance(m, (str, int))][:8]
+    return out
 
 
 def record_manual_submission(db, application_id: str, confirmation: str, by: str) -> dict:

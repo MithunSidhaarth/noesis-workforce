@@ -180,12 +180,24 @@ def opportunity_card(opp: dict, short: bool = False) -> tuple[str, list]:
         lines = [head, "", clip(opp["title"], 200)]
     else:
         lines = [f"🎯 {clip(opp['title'], 120)}", ""]
-    lines += [f"{kind.capitalize()} · {closes_in(deadline)}",
+    where = " · ".join(x for x in (opp.get("organizer"), opp.get("location"), opp.get("stipend")) if x)
+    lines += ([where] if where else []) + [f"{kind.capitalize()} · {closes_in(deadline)}",
               f"Who can apply: {who}",
               match,
-              f"Status: {plain_status(opp)}",
-              opp.get("official_url") or "The listing has no link."]
+              f"Status: {plain_status(opp)}"]
+    reasons = loads(opp.get("ai_reasons_json"), [])
+    flags = loads(opp.get("ai_red_flags_json"), [])
+    if reasons:
+        lines.append("Why it fits: " + "; ".join(clip(r, 80) for r in reasons[:3]))
+    if flags:
+        lines.append("Watch out: " + "; ".join(clip(r, 80) for r in flags[:3]))
+    if (opp.get("ghost_risk") or 0) >= 0.3:
+        lines.append("👻 May be a ghost listing: " + "; ".join(loads(opp.get("ghost_reasons_json"), [])[:2]))
+    lines.append(opp.get("official_url") or "The listing has no link.")
     if not short:
+        if opp.get("stage") and opp["stage"] != "found":
+            from .pipeline import LABELS
+            lines.append(f"Stage: {LABELS.get(opp['stage'], opp['stage'])}")
         if opp.get("relevance_rationale"):
             lines.append(f"Why it matches: {opp['relevance_rationale']}")
         cands = candidate_links(opp)

@@ -29,11 +29,19 @@ Today
 /approve <n> · /deny <n>
 /remind tomorrow 09:00 call the bank (also: in 2h …, fri 18:00 …, 2026-11-03 10:00 …)
 
-Opportunities
+Internships
+/today – today's best matches to apply to, and your streak
 /opportunities – open matches, soonest deadline first (/opportunities all for weaker ones)
 /opp <n> – full details with buttons
+/add <link> [description] – a posting you found (Internshala, Unstop, LinkedIn: paste the text)
 /confirm <n> [official link] – it's real, prepare an application
 /skip <n> [reason] – not for me
+/tailor <n> – resume keyword score and tailored bullets for it
+/drafts <ref> – copy-ready cover letter, bullets and answers
+
+Pipeline
+/pipeline – where every application stands
+/stage <ref> <stage> [YYYY-MM-DD HH:MM] – e.g. /stage 3f9a1c oa 2026-11-04 15:00
 
 Applications
 /missing – what your applications need from you
@@ -123,6 +131,23 @@ class CommandHandler:
                 opp, n = remind_opportunity(self.db, oid, by="telegram:owner")
                 note = (f"Reminders set: I'll message you {n} time{'s' if n != 1 else ''} before it closes." if n
                         else "Reminders were already set for this one.")
+                return self._cb(cq, note, f"{message.get('text', '')}\n\n{note}")
+            if kind == "g" and verb in ("y", "n"):
+                from workforce.pipeline import LABELS, StageError, decide_proposal
+                try:
+                    p = decide_proposal(self.db, oid, verb == "y", by="telegram:owner")
+                except StageError as e:
+                    return self._cb(cq, str(e)[:190], None)
+                note = f"Moved to {LABELS[p['stage']]}." if verb == "y" else "OK, left as it was."
+                return self._cb(cq, note, f"{message.get('text', '')}\n\n{note}")
+            if kind == "st" and verb in ("ghosted", "wait"):
+                from workforce.pipeline import set_stage
+                if verb == "ghosted":
+                    set_stage(self.db, oid, "ghosted", by="telegram:owner", note="no reply (button)")
+                    note = "Marked as no reply. It counts in your weekly insights."
+                else:
+                    self.db.execute("UPDATE opportunities SET stage_updated_at=? WHERE id=? AND stage='applied'", (now(), oid))
+                    note = "OK, I'll ask again in two weeks."
                 return self._cb(cq, note, f"{message.get('text', '')}\n\n{note}")
             if kind == "o" and verb == "s":
                 skip_opportunity(self.db, oid, by="telegram:owner", reason="not for me (button)")
@@ -247,6 +272,62 @@ class CommandHandler:
         token, _, conf = arg.partition(" ")
         record_submission(self.db, token, conf, by="telegram:owner")
         return "Recorded as submitted, and its deadline reminders are cancelled. I'll ask how it went in two weeks."
+
+    def cmd_add(self, arg):
+        from workforce.owner_actions import add_link
+        r = add_link(self.db, arg, by="telegram:owner")
+        return ("Got it. I'm reading the posting now and will add it to your shortlist." if r["queued"]
+                else "I'm already on that link.")
+
+    def cmd_stage(self, arg):
+        from workforce.owner_actions import change_stage
+        r = change_stage(self.db, arg, by="telegram:owner")
+        when = f" on {when_label(r['event_at'])}. I've set reminders and a prep plan" if r["event_at"] else ""
+        return f"“{clip(r['opportunity']['title'], 70)}” is now at {r['label']}{when}."
+
+    def cmd_pipeline(self, _):
+        from workforce.pipeline import ACTIVE, LABELS, board
+        cols = board(self.db)
+        lines = []
+        for st in ACTIVE + ["offer"]:
+            if cols[st]:
+                lines.append(f"{LABELS[st]} ({len(cols[st])})")
+                lines += [f"  • {clip(o['title'], 50)}{' · ' + o['organizer'] if o['organizer'] else ''} ({ref(o['id'])})"
+                          for o in cols[st][:5]]
+        return "\n".join(lines) or "Nothing in the pipeline yet. /today shows what to apply to."
+
+    def cmd_today(self, _):
+        from workforce.habits import streak, todays_shortlist
+        st = streak(self.db)
+        rows = todays_shortlist(self.db, st["quota"])
+        head = (f"Today: {st['today']}/{st['quota']} applied. Streak {plural(st['streak'], 'day')} (best {st['best']}).")
+        if not rows:
+            return head + "\nNo strong open matches right now. /opportunities all shows weaker ones."
+        return head + "\n\n" + "\n".join(
+            f"{i}. {clip(r['title'], 60)}{' at ' + r['organizer'] if r['organizer'] else ''}\n   "
+            f"{int((r['relevance_score'] or 0) * 100)}% fit. {closes_in(r['deadline'])}." for i, r in enumerate(rows, 1)) \
+            + "\n\n/opp <n> for details, /tailor <n> to tailor your resume, /confirm <n> to prepare it."
+
+    def cmd_tailor(self, arg):
+        o = find_opportunity(self.db, arg)
+        self.queue.enqueue(TaskSpec(bot_id="applications", kind="tailor_resume", payload={"opportunity_id": o["id"]},
+                                    requested_by="telegram", idempotency_key=f"tailor:{o['id']}:{int(now() // 60)}"))
+        return f"Tailoring your resume for “{clip(o['title'], 70)}”. It takes a minute."
+
+    def cmd_drafts(self, arg):
+        from workforce.owner_actions import find_application
+        a = find_application(self.db, arg)
+        d = loads(a.get("drafts_json"), {}) or {}
+        out = []
+        if d.get("cover_letter"):
+            out += ["Cover letter (draft, check it):", d["cover_letter"], ""]
+        if d.get("bullets"):
+            out += ["Resume bullets:"] + [f"• {b['text']}" for b in d["bullets"]] + [""]
+        for k, v in (d.get("answers") or {}).items():
+            out += [f"{k.replace('_', ' ').capitalize()}:", v, ""]
+        if d.get("ats") and d["ats"].get("score") is not None:
+            out.append(f"Keyword match {d['ats']['score']}%. Missing: {', '.join(d['ats']['missing'][:8]) or 'none'}")
+        return "\n".join(out) or "No drafts yet. Upload your resume and set profile facts, then /confirm it again."
 
     def cmd_remind(self, arg):
         r = create_reminder(self.db, arg, by="telegram:owner")

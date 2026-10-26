@@ -29,6 +29,8 @@ ALTER TABLE opportunities ADD COLUMN stipend TEXT;                -- as stated i
 ALTER TABLE opportunities ADD COLUMN published_at REAL;
 ALTER TABLE opportunities ADD COLUMN ghost_risk REAL;
 ALTER TABLE opportunities ADD COLUMN ghost_reasons_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE opportunities ADD COLUMN reposts INTEGER NOT NULL DEFAULT 0;  -- same role + company seen again under a new link
+ALTER TABLE opportunities ADD COLUMN last_seen REAL;
 CREATE INDEX IF NOT EXISTS idx_opp_stage ON opportunities(stage, stage_updated_at);
 CREATE INDEX IF NOT EXISTS idx_opp_org ON opportunities(organizer);
 
@@ -70,3 +72,14 @@ UPDATE opportunities SET stage = CASE a.outcome
   WHEN 'accepted' THEN 'offer' WHEN 'rejected' THEN 'rejected' WHEN 'no_response' THEN 'ghosted'
   WHEN 'withdrawn' THEN 'withdrawn' ELSE opportunities.stage END
   FROM applications a WHERE a.opportunity_id = opportunities.id AND a.outcome IS NOT NULL;
+
+-- the owner's resume versions (uploaded in the dashboard); text is used for ATS scores and tailoring
+CREATE TABLE IF NOT EXISTS resumes (
+  id TEXT PRIMARY KEY,
+  version TEXT NOT NULL,                 -- v1, v2, ... shown in insights ("which resume gets replies")
+  filename TEXT NOT NULL,
+  path TEXT NOT NULL,
+  text TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 0,
+  uploaded_at REAL NOT NULL
+);

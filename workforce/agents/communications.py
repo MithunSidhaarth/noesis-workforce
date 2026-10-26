@@ -94,6 +94,7 @@ class CommunicationsAgent(Agent):
                             state, cat, prio, dumps(actions), now(), now()))
             if "draft_reply" in actions:
                 ctx.enqueue_self("draft_reply", {"email_id": m["id"]}, idempotency_key=f"draft:{m['id']}")
+            self._propose_stage(ctx, m)
             if prio == "high":
                 drafting = drafting or "draft_reply" in actions
                 important.append(f"• {str(cat or 'email').replace('_', ' ').capitalize()}: {m['subject'][:80]} (from {m['from'][:60]})")
@@ -104,6 +105,30 @@ class CommunicationsAgent(Agent):
                                 if drafting else ""),
                              key=f"mail:{','.join(sorted(important))[:200]}", urgent=True)
         return {"fetched": len(msgs), "important": len(important)}
+
+    def _propose_stage(self, ctx: AgentContext, m: dict) -> None:
+        """A recruiter email about an application you made: suggest the new stage, you confirm
+        with one tap. Deterministic phrase rules; the email is data and can't change anything itself."""
+        from ..owner_actions import clip, ref
+        from ..pipeline import LABELS, STAGES, detect_stage, match_opportunity, propose_stage
+        hit = detect_stage(m.get("subject", ""), m.get("snippet", ""))
+        if not hit:
+            return
+        opp = match_opportunity(ctx.db, m.get("from", ""), m.get("subject", ""), m.get("snippet", ""))
+        if not opp or opp["stage"] == hit[0]:
+            return
+        if hit[0] in ("online_assessment", "interview_1", "hr") and STAGES.index(opp["stage"]) > STAGES.index(hit[0]):
+            return   # already further along: "interview" in a later email isn't news
+        prop, created = propose_stage(ctx.db, opp["id"], m["id"], hit[0], hit[1])
+        if not created:
+            return
+        ctx.notify_owner(f"📨 {LABELS[hit[0]]}? An email looks like news on an application\n\n“{clip(opp['title'], 90)}”"
+                         f"{' at ' + opp['organizer'] if opp['organizer'] else ''}\nFrom: {clip(m.get('from'), 60)}\n"
+                         f"Subject: {clip(m.get('subject'), 90)}\nIt says “{clip(hit[1], 60)}”, so I'd move it from "
+                         f"{LABELS[opp['stage']]} to {LABELS[hit[0]]}.\nref {ref(prop['id'])}",
+                         key=f"stageprop:{prop['id']}", urgent=hit[0] in ("online_assessment", "interview_1", "offer"),
+                         buttons=[[{"text": f"✅ Move to {LABELS[hit[0]]}"[:40], "data": f"g:{prop['id']}:y"},
+                                   {"text": "✖ Not this", "data": f"g:{prop['id']}:n"}]])
 
     def suggest_meeting_slots(self, ctx: AgentContext, task: Task) -> dict:
         cal = ctx.services.get("calendar")

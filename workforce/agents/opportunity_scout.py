@@ -176,15 +176,23 @@ class OpportunityScout(Agent):
 
     def _is_duplicate(self, ctx: AgentContext, opp: dict, fp: str) -> bool:
         if ctx.db.scalar("SELECT 1 FROM opportunities WHERE fingerprint=?", (fp,)):
+            ctx.db.execute("UPDATE opportunities SET last_seen=? WHERE fingerprint=?", (now(), fp))
             return True
         norm = parsing.normalize_title(opp["title"])
         # compare across types: the same event is often labelled differently by different sources.
         # Job titles repeat across companies ("Software Engineering Intern"), so when the organiser
         # is known only listings from the same organiser (or with none recorded) can be duplicates.
         org = (opp.get("organizer") or "").strip().lower()
-        recent = ctx.db.all("SELECT title, organizer FROM opportunities WHERE discovered_at > ?", (now() - 120 * 86400,))
-        return any(difflib.SequenceMatcher(None, norm, parsing.normalize_title(r["title"])).ratio() > 0.92
-                   for r in recent if not org or not r["organizer"] or r["organizer"].strip().lower() == org)
+        recent = ctx.db.all("SELECT id, title, organizer FROM opportunities WHERE discovered_at > ?", (now() - 180 * 86400,))
+        for r in recent:
+            if org and r["organizer"] and r["organizer"].strip().lower() != org:
+                continue
+            if difflib.SequenceMatcher(None, norm, parsing.normalize_title(r["title"])).ratio() > 0.92:
+                if org and r["organizer"]:
+                    # the same company posting the same role under a new link: a repost (ghost-listing signal)
+                    ctx.db.execute("UPDATE opportunities SET reposts=reposts+1, last_seen=? WHERE id=?", (now(), r["id"]))
+                return True
+        return False
 
     def _store(self, ctx: AgentContext, opp: dict, src: dict) -> str | None:
         fp = parsing.fingerprint(opp)
@@ -252,11 +260,23 @@ class OpportunityScout(Agent):
         if not opp:
             raise PermanentError(f"opportunity {oid} vanished")
         status = res.get("status", "needs_review")
-        score, rationale = score_opportunity(opp, load_profile())
+        profile = load_profile()
+        score, rationale = score_opportunity(opp, profile)
+        verdict = self._ai_fit(ctx, opp, profile) if status != "failed" and ctx.has_model("classify") else None
+        if verdict:
+            score, rationale = combine_scores(score, rationale, verdict)
+            ctx.db.execute("UPDATE opportunities SET ai_fit=?, ai_reasons_json=?, ai_red_flags_json=?, ai_eligible=? WHERE id=?",
+                           (verdict["fit"], dumps(verdict["reasons"]), dumps(verdict["red_flags"]), verdict["eligible"], oid))
         ctx.db.execute("UPDATE opportunities SET verification_status=?, verification_notes_json=?, last_verified=?, relevance_score=?, "
                        "relevance_rationale=?, application_status=? WHERE id=?",
                        (status, dumps(res.get("notes", [])), now(), score, rationale,
                         "VERIFIED" if status == "verified" else opp["application_status"], oid))
+        from ..ghosts import assess_ghost_risk
+        risk, why = assess_ghost_risk(ctx.db, oid)
+        if risk >= 0.3:   # still shown, ranked lower, with the reason
+            score = round(score * (1 - 0.5 * risk), 2)
+            ctx.db.execute("UPDATE opportunities SET relevance_score=?, relevance_rationale=? WHERE id=?",
+                           (score, f"{rationale}; possible ghost listing: {', '.join(why)}", oid))
         opp = ctx.db.one("SELECT * FROM opportunities WHERE id=?", (oid,))
         note = self._write_note(ctx, opp)
         if status == "failed":
@@ -276,6 +296,22 @@ class OpportunityScout(Agent):
             ctx.db.execute("UPDATE opportunities SET notified=1 WHERE id=?", (oid,))
             schedule_deadline_reminders(ctx.db, opp, ctx.bot.id)
         return {"opportunity_id": oid, "status": status, "score": score, "notified": notified, "note": note}
+
+    def _ai_fit(self, ctx: AgentContext, opp: dict, profile: dict) -> dict | None:
+        """Model verdict on fit for this student. Data in, JSON out; never trusted beyond its shape."""
+        prompt = ("Judge how well this listing fits the student below. Reply with JSON only: "
+                  '{"fit": 0..1, "reasons": [up to 3 short strings], "red_flags": [up to 3 short strings], '
+                  '"eligible_for_india_student": true | false | "unknown"}. eligible_for_india_student is false when the '
+                  "listing requires US/EU work authorisation or residency, a completed degree (graduates only), or a PhD; "
+                  '"unknown" when it does not say.\nSTUDENT: ' + dumps(profile_summary(profile)) + "\nLISTING:\n"
+                  + untrusted(f"{opp['title']}\nCompany: {opp.get('organizer') or 'unknown'}\nLocation: {opp.get('location') or 'unknown'}"
+                              f"\n{opp.get('summary') or ''}\n{loads(opp.get('raw_json'), {}).get('raw_text', '')[:4000]}", 6000))
+        try:
+            data = ctx.llm("classify", prompt, max_tokens=300).json()
+        except Exception as e:  # noqa: BLE001  (model optional: the deterministic score stands)
+            ctx.log(f"fit scoring unavailable: {e}", level="debug")
+            return None
+        return clean_verdict(data)
 
     def _write_note(self, ctx: AgentContext, opp: dict) -> str | None:
         vault = ctx.services.get("vault")
@@ -341,6 +377,46 @@ def score_opportunity(opp: dict, profile: dict) -> tuple[float, str]:
     if opp.get("verification_status") == "failed":
         score *= 0.2
     return round(min(score, 1.0), 2), "; ".join(reasons)
+
+
+PROFILE_KEYS = ("degree", "institution", "college", "graduation_year", "student_status", "citizenship", "location", "cgpa",
+                "skills", "target_roles", "target_season", "available_from", "duration_months", "stipend_min")
+
+
+def profile_summary(profile: dict) -> dict:
+    """What the fit model may see: verified, non-sensitive facts plus interests."""
+    facts = {k: v.get("value") for k, v in (profile.get("facts") or {}).items()
+             if isinstance(v, dict) and v.get("verified") and not v.get("sensitive") and v.get("value") not in (None, "")
+             and k in PROFILE_KEYS}
+    return {"facts": facts, "interests": profile.get("interests", [])[:15],
+            "preferred_locations": profile.get("preferred_locations", [])[:8]}
+
+
+def clean_verdict(data) -> dict | None:
+    if not isinstance(data, dict):
+        return None
+    try:
+        fit = max(0.0, min(1.0, float(data.get("fit"))))
+    except (TypeError, ValueError):
+        return None
+    el = data.get("eligible_for_india_student", "unknown")
+    el = "true" if el is True or str(el).lower() == "true" else "false" if el is False or str(el).lower() == "false" else "unknown"
+    lst = lambda k: [str(x)[:140] for x in (data.get(k) or []) if isinstance(x, (str, int, float))][:3]  # noqa: E731
+    return {"fit": round(fit, 2), "reasons": lst("reasons"), "red_flags": lst("red_flags"), "eligible": el}
+
+
+def combine_scores(det: float, rationale: str, v: dict) -> tuple[float, str]:
+    """0.4 x deterministic + 0.6 x model; not eligible (US-only, graduates-only, PhD-only) caps it at 0.2."""
+    score = round(0.4 * det + 0.6 * v["fit"], 2)
+    parts = [rationale, f"AI fit {int(v['fit'] * 100)}%"]
+    if v["reasons"]:
+        parts.append("why: " + ", ".join(v["reasons"]))
+    if v["red_flags"]:
+        parts.append("watch out: " + ", ".join(v["red_flags"]))
+    if v["eligible"] == "false":
+        score = min(score, 0.2)
+        parts.append("probably not open to a student in India")
+    return score, "; ".join(p for p in parts if p)
 
 
 def opportunity_note(opp: dict) -> tuple[dict, str]:
