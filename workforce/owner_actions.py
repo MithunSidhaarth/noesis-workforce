@@ -91,7 +91,8 @@ def _resolve(db: Database, table: str, token: str, listing_key: str | None = Non
     if not token:
         raise OwnerActionError("Which one? Add the number from the list or the 6-character ref, "
                                f"e.g. {'/approve 1' if table == 'approvals' else '/opp 1'}.")
-    if listing_key and token.isdigit():
+    # a 6-character ref can be all digits; list numbers are short
+    if listing_key and token.isdigit() and len(token) < 6:
         ids = loads(db.scalar("SELECT value FROM system_state WHERE key=?", (listing_key,)), [])
         n = int(token)
         if 1 <= n <= len(ids):

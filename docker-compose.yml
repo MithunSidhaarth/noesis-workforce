@@ -1,5 +1,5 @@
 # NOESIS Workforce — single-VPS deployment.
-#   docker compose up -d --build                 # core: api, worker, scheduler, telegram, caddy
+#   docker compose up -d --build                 # core: api, worker, scheduler, telegram, agents, caddy
 #   docker compose --profile fast up -d          # + Redis for instant wake-ups (optional)
 #   docker compose --profile vault up -d         # + Syncthing to sync your Obsidian vault (optional)
 # Private mode (no domain, dashboard over Tailscale only): see docker-compose.private.yml.
@@ -84,6 +84,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    deploy:
+      resources: { limits: { memory: 128M, cpus: "0.25" } }
+
+  agents:
+    <<: *app
+    # your custom agents' Telegram bots (one long-poll per BotFather token)
+    command: ["python", "-m", "services.agents.main"]
+    depends_on: { api: { condition: service_healthy } }
     deploy:
       resources: { limits: { memory: 128M, cpus: "0.25" } }
 

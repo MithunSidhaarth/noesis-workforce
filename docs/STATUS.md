@@ -1,8 +1,52 @@
 # Status
 
-Last updated: 2026-10-16. Branch `main`.
+Last updated: 2026-10-26. Branch `v2.0` (PR to `main`).
 
-## Summary
+## v2.0 (this branch)
+
+175 automated tests pass, `ruff check --select F .` is clean and the dashboard
+builds. Everything below is tested with fakes only; nothing new was called live.
+
+- **Claude Code as a model provider** (`claude -p`, all tools off, one call at a
+  time); falls back to Gemini/Groq when logged out or at the plan limit.
+- **Bengaluru internships**: Greenhouse/Lever/Ashby company boards (official
+  APIs), SimplifyJobs India, Bengaluru news queries, `/add <link>` (never
+  LinkedIn). Internshala/Unstop stay disabled (no scraping).
+- **Pipeline** found → shortlisted → preparing → applied → OA → interviews →
+  offer/rejected/ghosted/withdrawn (migration 0006) with history, recruiter-email
+  stage proposals you confirm, OA/interview reminders and a company prep plan,
+  14-day nudges, weekly funnel and what's-working insights.
+- **Fit scores** from the model on a verified profile, India-student eligibility,
+  a ghost-listing detector, daily quota shortlist and streak in the brief.
+- **Tailored drafts**: cover letter, why-me, resume bullets traceable to your
+  resume, an ATS keyword score and a one-page resume PDF.
+- **Custom Telegram agents** (migration 0007): one BotFather bot each, tokens
+  encrypted with `NOESIS_SECRET_KEY`, owner-only, fixed tool allow-list,
+  schedules, memory, voice notes (Groq Whisper). Templates include an Interview
+  Coach for voice-note mock interviews. The built-in Assistant answers unmapped
+  main-bot text. See [AGENTS](AGENTS.md).
+- **Phone calls** (`phone.call_owner`, the call-me settings): off by default,
+  quiet hours 22:00-08:00, 3 a day, 30 min apart, only for interview-in-1h,
+  last-day deadlines, agent requests and `/call test`; Telegram fallback. See
+  [PHONE](PHONE.md).
+- **Google Calendar sync** (`calendar.owner_event`): off by default, events on
+  your own calendar only, never guests.
+- **Extras**: referral finder (search links and a drafted note; NOESIS never
+  messages anyone), drive radar (Google STEP, Engage, WoW, GRiD, Code for Good,
+  GS India), company dossier, debrief question bank, offer comparison.
+- **Dashboard** rebuilt around five pages (Home, Internships, Applications,
+  Agents, Settings) plus Prep & people; light/dark; phone tab bar.
+- **GCP e2-micro deploy** (`deploy/gcp/`): systemd with memory caps, 2 GB swap,
+  Tailscale-only dashboard, nightly backup to Cloud Storage, a health check that
+  messages you on Telegram. See [GCP](GCP.md).
+- Fix: a 6-character ref made only of digits was read as a list number.
+
+**Not live-tested yet**: Claude Code on a VM, Twilio/Telnyx calls, Groq speech
+to text, Wikipedia and Google News for dossiers, the company-board APIs and
+their slugs, Google Calendar writes, a real GCE VM, Tailscale serve and
+`gcloud storage`. Telnyx support follows its TeXML docs and has had the least testing.
+
+## Summary (v1)
 
 All ten bots, the runtime, dashboard, Telegram command centre, policies and
 deployment are implemented and pass 103 automated tests. The Docker stack builds
